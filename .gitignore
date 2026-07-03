@@ -1,0 +1,22 @@
+# Local Virtual Environments
+venv/
+.venv/
+env/
+
+# Python caching systems
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local Database files
+*.db
+omniplant.db
+
+# Environmental configurations (Private Secrets)
+.env
+.env.local
+
+# IDE configurations
+.vscode/
+.idea/

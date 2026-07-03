@@ -1,12 +1,22 @@
+import os
 from fastapi import FastAPI
+import uvicorn
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Import Auth Layer Components
 from backend.api.routers import auth, users
 from backend.core.database import engine, Base, SessionLocal
 from backend.models.user import UserModel
 
-# Autogenerate database tables
+# Import Priyanshu's Connection Components
+from backend.connection.neo_4j import connect_to_neo4j
+from backend.connection.llama_parse import parse_pdf
+
+# RUN SQLITE DATABASE MIGRATIONS & SEED DATA
 Base.metadata.create_all(bind=engine)
 
-# Seed Database if completely empty
 db = SessionLocal()
 if db.query(UserModel).count() == 0:
     db.add(UserModel(employee_id="EMP-1042", name="Ramesh", role_tier=1, password_hash=UserModel.hash_password("password123")))
@@ -15,6 +25,20 @@ if db.query(UserModel).count() == 0:
     db.commit()
 db.close()
 
+# INITIALIZE THE SINGLE CORE FASTAPI INSTANCE
 app = FastAPI(title="OmniPlant.AI Production-Level Engine")
+
+# START UP LIFECYCLE INITIALIZATIONS 
+# Connect to Neo4j database
+# connect_to_neo4j()
+
+# Parse PDF file using LlamaParse
+# parse_pdf()
+
+# MOUNT ARCHITECTURAL ROUTERS
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(users.router, prefix="/api/users", tags=["Admin User Management"])
+
+# APPLICATION ENTRY POINT
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

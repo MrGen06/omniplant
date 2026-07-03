@@ -6,6 +6,11 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.139.0",
+    "llama-index>=0.14.23",
+    "llama-index-graph-stores-neo4j>=0.7.0",
+    "llama-parse>=0.6.94",
+    "neo4j>=5.28.4",
     "pandas>=3.0.3",
+    "python-dotenv>=1.2.2",
     "uvicorn>=0.49.0",
 ]

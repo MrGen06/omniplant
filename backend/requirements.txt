@@ -1,3 +1,8 @@
 fastapi
 uvicorn
 pandas
+llama-index 
+neo4j 
+python-dotenv 
+llama-index-graph-stores-neo4j 
+llama-parse

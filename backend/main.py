@@ -6,13 +6,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import Auth Layer Components
-from backend.api.routers import auth, users
-from backend.core.database import engine, Base, SessionLocal
-from backend.models.user import UserModel
+from api.routers import auth, users
+from core.database import engine, Base, SessionLocal
+from models.user import UserModel
 
 # Import Priyanshu's Connection Components
-from backend.connection.neo_4j import connect_to_neo4j
-from backend.connection.llama_parse import parse_pdf
+from connection.neo_4j import connect_to_neo4j
+from connection.llama_parse import parse_pdf
 
 # RUN SQLITE DATABASE MIGRATIONS & SEED DATA
 Base.metadata.create_all(bind=engine)

@@ -2,9 +2,9 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from backend.core.database import get_db
-from backend.models.user import UserModel
-from backend.core.security import create_access_token
+from core.database import get_db
+from models.user import UserModel
+from core.security import create_access_token
 from typing import List
 
 router = APIRouter()

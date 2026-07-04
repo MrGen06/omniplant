@@ -30,7 +30,7 @@ def parse_pdf(file_path=None):
 
     # If no path is provided, dynamically target his sample file location safely
     if file_path is None:
-        file_path = os.path.join(current_dir, "sample_50_words (1).pdf")
+        file_path = "sample_50_words (1).pdf"
 
     # Guard clause: Check if file physically exists before calling remote service
     if not os.path.exists(file_path):

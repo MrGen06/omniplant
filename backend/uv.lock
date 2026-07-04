@@ -172,6 +172,7 @@ dependencies = [
     { name = "neo4j" },
     { name = "pandas" },
     { name = "python-dotenv" },
+    { name = "requests" },
     { name = "uvicorn" },
 ]
 
@@ -184,6 +185,7 @@ requires-dist = [
     { name = "neo4j", specifier = ">=5.28.4" },
     { name = "pandas", specifier = ">=3.0.3" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "requests", specifier = ">=2.32.3" },
     { name = "uvicorn", specifier = ">=0.49.0" },
 ]
 

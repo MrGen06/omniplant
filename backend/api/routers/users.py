@@ -6,6 +6,8 @@ from jose import JWTError
 from core.database import get_db
 from models.user import UserModel
 from core.security import decode_access_token
+from core.security import create_access_token
+from typing import List
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")

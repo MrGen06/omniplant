@@ -1,6 +1,5 @@
 from sqlalchemy import Column, String, Integer
 import bcrypt
-
 from core.database import Base
 
 class UserModel(Base):

@@ -16,15 +16,15 @@ from connection.neo_4j import connect_to_neo4j
 from connection.llama_parse import parse_pdf
 
 # RUN SQLITE DATABASE MIGRATIONS & SEED DATA
-# Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 
-# db = SessionLocal()
-# if db.query(UserModel).count() == 0:
-#     db.add(UserModel(employee_id="EMP-1042", name="Ramesh", role_tier=1, password_hash=UserModel.hash_password("password123")))
-#     db.add(UserModel(employee_id="EMP-2088", name="Priya", role_tier=2, password_hash=UserModel.hash_password("password123")))
-#     db.add(UserModel(employee_id="EMP-9001", name="Mr. Sharma", role_tier=3, password_hash=UserModel.hash_password("password123")))
-#     db.commit()
-# db.close()
+db = SessionLocal()
+if db.query(UserModel).count() == 0:
+    db.add(UserModel(employee_id="EMP-1042", name="Ramesh", role_tier=1, password_hash=UserModel.hash_password("password123")))
+    db.add(UserModel(employee_id="EMP-2088", name="Priya", role_tier=2, password_hash=UserModel.hash_password("password123")))
+    db.add(UserModel(employee_id="EMP-9001", name="Mr. Sharma", role_tier=3, password_hash=UserModel.hash_password("password123")))
+    db.commit()
+db.close()
 
 # INITIALIZE THE SINGLE CORE FASTAPI INSTANCE
 app = FastAPI(title="OmniPlant.AI Production-Level Engine")

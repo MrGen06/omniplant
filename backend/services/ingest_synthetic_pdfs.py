@@ -1,12 +1,15 @@
-import os
 import json
+import os
 import tempfile
 
 import dotenv
+import google.generativeai as genai
 import requests
 
 from connection.llama_parse import parser
 from connection.neo_4j import driver
+
+
 dotenv.load_dotenv()
 
 HEADERS = {
@@ -15,14 +18,68 @@ HEADERS = {
 }
 
 HF_API_URL = "https://router.huggingface.co/hf-inference/models/BAAI/bge-small-en"
-
 BATCH_SIZE = 16
+
+ALLOWED_RELATIONS = {
+    "HAS_PART",
+    "CONNECTED_TO",
+    "GOVERNS",
+    "LOCATED_IN",
+    "MONITORS",
+    "REQUIRES",
+    "USES",
+    "CAUSES",
+    "INDICATES",
+}
+
+
+# Gemini is used only for graph extraction, not for embeddings.
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = genai.GenerativeModel("gemini-2.5-flash")
+
+
+def build_extraction_prompt(text: str) -> str:
+    """Build the graph extraction prompt for Gemini."""
+    return f"""
+Extract entities and relationships from this industrial manual.
+
+Return ONLY valid JSON.
+
+Format:
+
+{{
+  "entities":[
+    {{
+      "name":"Pump-101",
+      "label":"Equipment"
+    }}
+  ],
+  "relationships":[
+    {{
+      "source":"Pump-101",
+      "type":"CONNECTED_TO",
+      "target":"Valve-10"
+    }}
+  ]
+}}
+
+Text:
+{text}
+"""
+
+
+def extract_graph(text: str) -> dict:
+    """Extract entities and relationships from chunk text."""
+    try:
+        response = model.generate_content(build_extraction_prompt(text))
+        return json.loads(response.text)
+    except Exception as exc:
+        print(exc)
+        return {"entities": [], "relationships": []}
 
 
 def embed_batch(texts: list[str]) -> list[list[float]]:
-    """
-    Generate embeddings for a batch of text chunks.
-    """
+    """Generate embeddings for a batch of text chunks."""
     payload = {
         "inputs": texts,
         "options": {
@@ -31,12 +88,7 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
         },
     }
 
-    response = requests.post(
-        HF_API_URL,
-        headers=HEADERS,
-        json=payload,
-    )
-
+    response = requests.post(HF_API_URL, headers=HEADERS, json=payload)
     if response.status_code == 200:
         return response.json()
 
@@ -46,16 +98,13 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
 
 
 def parse_pdf(file_path: str):
-    """
-    Parse a PDF using LlamaParse.
-    """
+    """Parse a PDF using the shared LlamaParse client."""
     if not parser:
         print("LLAMA_CLOUD_API_KEY missing.")
         return []
 
     try:
         print(f"Parsing {file_path}...")
-
         documents = parser.load_data(file_path)
 
         if not documents:
@@ -64,130 +113,157 @@ def parse_pdf(file_path: str):
 
         print(f"Parsing complete. Total documents: {len(documents)}")
         return documents
-
-    except Exception as e:
-        print(f"Parsing Error: {e}")
+    except Exception as exc:
+        print(f"Parsing Error: {exc}")
         return []
 
 
-def all_flow(file_path: str, filename: str):
-    """
-    Parse the PDF and generate embeddings for all chunks.
-    """
-    
-    
-    # Step 1: Parse PDF
-    documents = parse_pdf(file_path)
+def chunk_documents(documents) -> list[str]:
+    """Extract plain text chunks from parsed documents."""
+    return [doc.text for doc in documents]
 
-    if not documents:
-        return [], []
 
-    # Step 2: Extract text
-    chunk_texts = [doc.text for doc in documents]
+def embed_in_batches(chunk_texts: list[str]) -> list[list[float]]:
+    """Embed chunks in fixed-size batches to keep the request flow simple."""
+    all_vectors: list[list[float]] = []
 
-    print(f"Total chunks: {len(chunk_texts)}")
-
-    # Step 3: Generate embeddings in batches
-    all_vectors = []
-
-    for i in range(0, len(chunk_texts), BATCH_SIZE):
-        batch = chunk_texts[i:i + BATCH_SIZE]
-
-        print(
-            f"Embedding batch {i // BATCH_SIZE + 1} "
-            f"({len(batch)} chunks)"
-        )
+    for start_index in range(0, len(chunk_texts), BATCH_SIZE):
+        batch = chunk_texts[start_index:start_index + BATCH_SIZE]
+        print(f"Embedding batch {start_index // BATCH_SIZE + 1} ({len(batch)} chunks)")
 
         vectors = embed_batch(batch)
-
         if vectors:
             all_vectors.extend(vectors)
 
-    print(f"Generated {len(all_vectors)} embeddings.")
-    
-    
-    # step 4: push to neo4j
-    try:
-       with driver.session() as session:
+    return all_vectors
 
-        # Create the document node
-            session.run(
-            """
-            MERGE (d:Document {name: $filename})
+
+def create_document_node(session, filename: str) -> None:
+    """Create or reuse the main document node."""
+    session.run(
+        """
+        MERGE (d:Document {name: $filename})
+        """,
+        filename=filename,
+    )
+
+
+def create_chunk_node(session, filename: str, index: int, text: str, embedding: list[float]) -> None:
+    """Store one chunk node and link it to the document."""
+    session.run(
+        """
+        MATCH (d:Document {name:$filename})
+
+        MERGE (c:Chunk {chunk_id:$chunk_id})
+
+        SET
+            c.text=$text,
+            c.embedding=$embedding
+
+        MERGE (d)-[:HAS_CHUNK]->(c)
+        """,
+        filename=filename,
+        chunk_id=f"{filename}_{index}",
+        text=text,
+        embedding=embedding,
+    )
+
+
+def create_entity_links(session, filename: str, chunk_index: int, graph: dict) -> None:
+    """Store extracted entities and connect them to the current chunk."""
+    for entity in graph["entities"]:
+        session.run(
+            f"""
+            MERGE (e:{entity['label']} {{name:$name}})
             """,
-            filename=filename,
+            name=entity["name"],
         )
 
-        # Create chunks
-            for idx, (doc, embedding) in enumerate(zip(documents, all_vectors)):
-                session.run(
-                """
-                MATCH (d:Document {name: $filename})
+        session.run(
+            f"""
+            MATCH (c:Chunk {{chunk_id:$chunk_id}})
+            MATCH (e:{entity['label']} {{name:$name}})
 
-                CREATE (c:Chunk {
-                    chunk_id: $chunk_id,
-                    text: $text,
-                    embedding: $embedding
-                })
+            MERGE (c)-[:MENTIONS]->(e)
+            """,
+            chunk_id=f"{filename}_{chunk_index}",
+            name=entity["name"],
+        )
 
-                CREATE (d)-[:HAS_CHUNK]->(c)
-                """,
-                filename=filename,
-                chunk_id=idx,
-                text=doc.text,
-                embedding=embedding,
-            )
-            print("Data successfully ingested into Neo4j.")
-    except Exception as e:
-        print(f"Neo4j Ingestion Error: {e}")
-        
-    
+
+def create_relationship_links(session, graph: dict) -> None:
+    """Store only allowed relationships from the extracted graph."""
+    for rel in graph["relationships"]:
+        if rel["type"] not in ALLOWED_RELATIONS:
+            continue
+
+        session.run(
+            f"""
+            MATCH (a {{name:$source}})
+            MATCH (b {{name:$target}})
+
+            MERGE (a)-[:{rel['type']}]->(b)
+            """,
+            source=rel["source"],
+            target=rel["target"],
+        )
+
+
+def store_in_neo4j(filename: str, documents, all_vectors: list[list[float]]) -> None:
+    """Write the parsed chunks, embeddings, and graph data into Neo4j."""
+    try:
+        with driver.session() as session:
+            create_document_node(session, filename)
+
+            for index, (doc, embedding) in enumerate(zip(documents, all_vectors)):
+                create_chunk_node(session, filename, index, doc.text, embedding)
+                graph = extract_graph(doc.text)
+                create_entity_links(session, filename, index, graph)
+                create_relationship_links(session, graph)
+    except Exception as exc:
+        print(f"Neo4j Ingestion Error: {exc}")
+
+
+def all_flow(file_path: str, filename: str):
+    """Run the full ingest flow in a simple, readable sequence."""
+    documents = parse_pdf(file_path)
+    if not documents:
+        return [], []
+
+    chunk_texts = chunk_documents(documents)
+    print(f"Total chunks: {len(chunk_texts)}")
+
+    all_vectors = embed_in_batches(chunk_texts)
+    print(f"Generated {len(all_vectors)} embeddings.")
+
+    store_in_neo4j(filename, documents, all_vectors)
     return documents, all_vectors
-            
-    
-
-    
 
 
 def ingest_uploaded_pdf(file_bytes: bytes, filename: str):
-    """
-    Save uploaded PDF temporarily, parse it, generate embeddings,
-    and delete the temporary file.
-    """
+    """Save an uploaded PDF temporarily, process it, and remove the temp file."""
     temp_path = None
 
     try:
-        # Create a temporary PDF
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=".pdf"
-        ) as temp_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
             temp_file.write(file_bytes)
             temp_path = temp_file.name
 
         print(f"Temporary file created: {temp_path}")
-
-        # Parse + Embed
-        documents, embeddings = all_flow(temp_path,filename)
-
-        # Example: Store in Neo4j
-        # for doc, embedding in zip(documents, embeddings):
-        #     create_node(doc.text, embedding)
+        documents, embeddings = all_flow(temp_path, filename)
 
         return {
             "documents": documents,
             "embeddings": embeddings,
             "count": len(documents),
         }
-
-    except Exception as e:
-        print(f"Processing Error: {e}")
+    except Exception as exc:
+        print(f"Processing Error: {exc}")
         return {
             "documents": [],
             "embeddings": [],
             "count": 0,
         }
-
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)

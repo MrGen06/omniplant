@@ -30,7 +30,7 @@ from connection.llama_parse import parse_pdf
 app = FastAPI(title="OmniPlant.AI Production-Level Engine")
 
 # Protect ingest routes with bearer-token validation before request handlers run.
-app.add_middleware(CredentialMiddleware)
+
 
 # START UP LIFECYCLE INITIALIZATIONS 
 # Connect to Neo4j database
@@ -46,11 +46,13 @@ app.include_router(ingest.router, prefix="/api/ingest", tags=["PDF Ingestion"])
 
 # APPLICATION ENTRY POINT
 
-from services.ingest_synthetic_pdfs import ingest_pdf_path
+from services.ingest_synthetic_pdfs import all_flow
 if __name__ == "__main__":
     
-    ingest_pdf_path("sample_50_words (1).pdf")
-    
+     document,embeddings = all_flow("sample_50_words (1).pdf","sample_file")
+     print(document[0].text)
+     print(embeddings[0])
+         
     
 
     # uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

@@ -1,6 +1,7 @@
 from sqlalchemy import Column, String, Integer
 import bcrypt
-from backend.core.database import Base
+
+from core.database import Base
 
 class UserModel(Base):
     __tablename__ = "users"

@@ -3,9 +3,9 @@ from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from jose import JWTError
-from backend.core.database import get_db
-from backend.models.user import UserModel
-from backend.core.security import decode_access_token
+from core.database import get_db
+from models.user import UserModel
+from core.security import decode_access_token
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")

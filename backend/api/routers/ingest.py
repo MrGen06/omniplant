@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from services.ingest_synthetic_pdfs import ingest_uploaded_pdf
@@ -7,12 +7,17 @@ from services.ingest_synthetic_pdfs import ingest_uploaded_pdf
 router = APIRouter()
 
 
+class IngestResponse(BaseModel):
+    filename: str
+    chunks_ingested: int
 
 
 
 
 
-@router.post("/pdf", )
+
+
+@router.post("/pdf", response_model=IngestResponse)
 async def ingest_pdf_from_frontend(
     file: UploadFile = File(...),
 
@@ -31,10 +36,10 @@ async def ingest_pdf_from_frontend(
             detail="Uploaded file is empty",
         )
 
-    chunks_ingested = ingest_uploaded_pdf(file_bytes, file.filename or "upload.pdf")
+    ingest_result = ingest_uploaded_pdf(file_bytes, file.filename or "upload.pdf")
 
     return {
         "filename": file.filename or "upload.pdf",
-        "chunks_ingested": chunks_ingested,
+        "chunks_ingested": ingest_result.get("count", 0),
       
     }

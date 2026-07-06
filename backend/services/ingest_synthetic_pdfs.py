@@ -5,7 +5,7 @@ import tempfile
 import dotenv
 import google.generativeai as genai
 import requests
-
+import re
 from connection.llama_parse import parser
 from connection.neo_4j import driver
 
@@ -42,6 +42,18 @@ def build_extraction_prompt(text: str) -> str:
     """Build the graph extraction prompt for Gemini."""
     return f"""
 Extract entities and relationships from this industrial manual.
+allow only this relationship
+ALLOWED_RELATIONS = {
+    "HAS_PART",
+    "CONNECTED_TO",
+    "GOVERNS",
+    "LOCATED_IN",
+    "MONITORS",
+    "REQUIRES",
+    "USES",
+    "CAUSES",
+    "INDICATES",
+}
 
 Return ONLY valid JSON.
 
@@ -72,7 +84,21 @@ def extract_graph(text: str) -> dict:
     """Extract entities and relationships from chunk text."""
     try:
         response = model.generate_content(build_extraction_prompt(text))
-        return json.loads(response.text)
+        if(response.text is None):
+            print("Gemini returned no text.")
+            return {"entities": [], "relationships": []}
+        # print(f"Graph Extraction Response: {response.text}")  # Safe preview
+        text = response.text.strip()
+
+        # Remove ```json ... ```
+        match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+        if match:
+            text = match.group(1)
+
+        print(text)
+
+        return json.loads(text)
+      
     except Exception as exc:
         print(exc)
         return {"entities": [], "relationships": []}
@@ -170,43 +196,75 @@ def create_chunk_node(session, filename: str, index: int, text: str, embedding: 
 
 
 def create_entity_links(session, filename: str, chunk_index: int, graph: dict) -> None:
-    """Store extracted entities and connect them to the current chunk."""
-    for entity in graph["entities"]:
-        session.run(
-            f"""
-            MERGE (e:{entity['label']} {{name:$name}})
-            """,
-            name=entity["name"],
-        )
+    """Create entity nodes and connect them to the chunk."""
 
-        session.run(
+    chunk_id = f"{filename}_{chunk_index}"
+
+    for entity in graph.get("entities", []):
+        label = entity["label"].replace(" ", "_")
+        name = entity["name"].strip()
+
+        result = session.run(
             f"""
-            MATCH (c:Chunk {{chunk_id:$chunk_id}})
-            MATCH (e:{entity['label']} {{name:$name}})
+            MATCH (c:Chunk {{chunk_id: $chunk_id}})
+
+            MERGE (e:{label} {{name: $name}})
 
             MERGE (c)-[:MENTIONS]->(e)
+
+            RETURN c.chunk_id AS chunk,
+                   labels(e) AS labels,
+                   e.name AS entity
             """,
-            chunk_id=f"{filename}_{chunk_index}",
-            name=entity["name"],
+            chunk_id=chunk_id,
+            name=name,
         )
+
+        record = result.single()
+
+        if record is None:
+            print(f"❌ Chunk not found: {chunk_id}")
+        else:
+            print(f"✅ Linked {record['entity']} to {record['chunk']}")
 
 
 def create_relationship_links(session, graph: dict) -> None:
-    """Store only allowed relationships from the extracted graph."""
-    for rel in graph["relationships"]:
-        if rel["type"] not in ALLOWED_RELATIONS:
+    """Create relationships between extracted entities."""
+
+    for rel in graph.get("relationships", []):
+
+        rel_type = rel["type"]
+
+        if rel_type not in ALLOWED_RELATIONS:
+            print(f"⚠️ Skipping unsupported relation: {rel_type}")
             continue
 
-        session.run(
-            f"""
-            MATCH (a {{name:$source}})
-            MATCH (b {{name:$target}})
+        source = rel["source"].strip()
+        target = rel["target"].strip()
 
-            MERGE (a)-[:{rel['type']}]->(b)
+        result = session.run(
+            f"""
+            MATCH (a {{name: $source}})
+            MATCH (b {{name: $target}})
+
+            MERGE (a)-[r:{rel_type}]->(b)
+
+            RETURN a.name AS source,
+                   type(r) AS relation,
+                   b.name AS target
             """,
-            source=rel["source"],
-            target=rel["target"],
+            source=source,
+            target=target,
         )
+
+        record = result.single()
+
+        if record is None:
+            print(f"❌ Could not create: {source} -[{rel_type}]-> {target}")
+        else:
+            print(
+                f"✅ {record['source']} -[{record['relation']}]-> {record['target']}"
+            )
 
 
 def store_in_neo4j(filename: str, documents, all_vectors: list[list[float]]) -> None:
@@ -216,8 +274,10 @@ def store_in_neo4j(filename: str, documents, all_vectors: list[list[float]]) -> 
             create_document_node(session, filename)
 
             for index, (doc, embedding) in enumerate(zip(documents, all_vectors)):
+            
                 create_chunk_node(session, filename, index, doc.text, embedding)
                 graph = extract_graph(doc.text)
+                print(graph)
                 create_entity_links(session, filename, index, graph)
                 create_relationship_links(session, graph)
     except Exception as exc:
@@ -232,12 +292,17 @@ def all_flow(file_path: str, filename: str):
 
     chunk_texts = chunk_documents(documents)
     print(f"Total chunks: {len(chunk_texts)}")
+    # print(documents)
+    # print(chunk_texts)
 
     all_vectors = embed_in_batches(chunk_texts)
+    
     print(f"Generated {len(all_vectors)} embeddings.")
 
     store_in_neo4j(filename, documents, all_vectors)
     return documents, all_vectors
+    
+    
 
 
 def ingest_uploaded_pdf(file_bytes: bytes, filename: str):

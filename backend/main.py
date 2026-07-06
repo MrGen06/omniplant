@@ -49,9 +49,9 @@ app.include_router(ingest.router, prefix="/api/ingest", tags=["PDF Ingestion"])
 from services.ingest_synthetic_pdfs import all_flow
 if __name__ == "__main__":
     
-     document,embeddings = all_flow("manual_pumps_p302.pdf","manual_pumps_p302.pdf")
-     print(document[0].text)
-     print(embeddings[0])
+       all_flow("Pseudo_Pump_Manual.pdf","Pseudo_Pump_Manual.pdf")
+    #  print(document[0].text)
+    #  print(embeddings[0])
          
     
 

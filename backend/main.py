@@ -50,9 +50,8 @@ from services.ingest_synthetic_pdfs import all_flow
 if __name__ == "__main__":
     
        all_flow("Pseudo_Pump_Manual.pdf","Pseudo_Pump_Manual.pdf")
-    #  print(document[0].text)
-    #  print(embeddings[0])
-         
-    
+    # #  print(document[0].text)
+    # #  print(embeddings[0])
+  
 
     # uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

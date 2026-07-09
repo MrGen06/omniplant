@@ -49,7 +49,7 @@ def insert_workorders_batch(tx, batch):
     UNWIND $batch AS row
     
     // 1. Create or match the Equipment node
-    MERGE (e:Equipment {id: row.Equipment_Tag})
+    MERGE (e:Equipment {id: row.Equipment_Tag, name: toLower(row.Equipment_Tag)})
     
     // 2. Create or match the WorkOrder node
     MERGE (w:WorkOrder {id: row.WO_ID})

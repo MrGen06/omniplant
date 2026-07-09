@@ -64,7 +64,7 @@ def update_coordinates():
     UNWIND $batch AS row
     
     // Find or initialize the exact equipment element matching the tag identity
-    MERGE (e:Equipment {id: row.equipment_id})
+    MERGE (e:Equipment {id: row.equipment_id, name: toLower(row.equipment_id)})
     
     // Append or overwrite explicit floating point box coordinates to the asset profile
     SET e.x_min = toFloat(row.x_min), 

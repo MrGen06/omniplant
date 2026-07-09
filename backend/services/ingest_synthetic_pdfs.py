@@ -4,7 +4,6 @@ from pyexpat.errors import messages
 import tempfile
 
 import dotenv
-import google.generativeai as genai
 import requests
 import re
 from connection.llama_parse import parser
@@ -238,7 +237,7 @@ def create_entity_links(session, filename: str, chunk_index: int, graph: dict) -
             f"""
             MATCH (c:Chunk {{chunk_id: $chunk_id}})
 
-            MERGE (e:{label} {{name: $name}})
+            MERGE (e:{label} {{name:toLower($name),id: $name}})
 
             MERGE (c)-[:MENTIONS]->(e)
 
@@ -307,11 +306,25 @@ def store_in_neo4j(filename: str, documents, all_vectors: list[list[float]]) -> 
             
                 create_chunk_node(session, filename, index, doc.text, embedding)
                 graph = extract_graph(doc.text)
-                print(graph)
-                # create_entity_links(session, filename, index, graph)
-                # create_relationship_links(session, graph)
+                # print(graph)
+                create_entity_links(session, filename, index, graph)
+                create_relationship_links(session, graph)
     except Exception as exc:
         print(f"Neo4j Ingestion Error: {exc}")
+        
+
+def create_vector_index(session):
+        session.run("""
+        CREATE VECTOR INDEX chunkEmbedding IF NOT EXISTS
+        FOR (c:Chunk)
+        ON (c.embedding)
+        OPTIONS {
+            indexConfig: {
+                `vector.dimensions`: 384,
+                `vector.similarity_function`: 'cosine'
+            }
+        }
+        """)
 
 
 def all_flow(file_path: str, filename: str):
@@ -330,12 +343,13 @@ def all_flow(file_path: str, filename: str):
     print(f"Generated {len(all_vectors)} embeddings.")
 
     store_in_neo4j(filename, documents, all_vectors)
+    create_vector_index(driver.session())
     return documents, all_vectors
     
     
 
 
-def ingest_uploaded_pdf(file_bytes: bytes, filename: str):
+async def ingest_uploaded_pdf(file_bytes: bytes, filename: str):
     """Save an uploaded PDF temporarily, process it, and remove the temp file."""
     temp_path = None
 

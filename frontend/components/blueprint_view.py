@@ -25,41 +25,45 @@ def get_image_base64(image_path):
 
 def render_blueprint_tab():
     st.subheader("Interactive P&ID Asset Explorer")
-    
-    # 1. Inspect the absolute directory layout of your live app
-    BASE_DIR = os.path.abspath(os.getcwd())
-    
-    # Let's check common directory paths where Streamlit might be executing from
-    option1 = os.path.join(BASE_DIR, "frontend", "assets", "blueprint.png")
-    option2 = os.path.join(BASE_DIR, "assets", "blueprint.png")
-    
-    # Determine which path actually exists on the cloud server
-    if os.path.exists(option1):
-        IMAGE_PATH = option1
-    elif os.path.exists(option2):
-        IMAGE_PATH = option2
-    else:
-        # If both fail, print the active layout so we know exactly where it is!
-        st.error(f"⚠️ File not found. Current executing directory: `{BASE_DIR}`")
-        st.info("Here is what the cloud container sees in the current folder:")
-        try:
-            st.code("\n".join(os.listdir(BASE_DIR)))
-        except Exception:
-            pass
-        return
+    st.write("Click directly on any highlighted equipment tag on the blueprint drawing to fetch graph records.")
 
-    # Convert the found path to Base64
+    # 1. Setup Base Directories
+    BASE_DIR = os.path.abspath(os.getcwd())
+    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__)) # components/
+    FRONTEND_DIR = os.path.dirname(CURRENT_DIR) # frontend/
+
+    # 2. Handle Image Path
+    option1_img = os.path.join(FRONTEND_DIR, "assets", "blueprint.png")
+    option2_img = os.path.join(BASE_DIR, "assets", "blueprint.png")
+    IMAGE_PATH = option1_img if os.path.exists(option1_img) else option2_img
+
     img_b64 = get_image_base64(IMAGE_PATH)
     if not img_b64:
-        st.error(f"Failed to decode image at: {IMAGE_PATH}")
+        st.error("Missing blueprint image asset inside 'assets/blueprint.png'!")
         return
 
-    # 2. Load Coordinates Mapping
-    try:
-        with open("../backend/data/blueprint_coords.json", "r") as f:
-            equipment_nodes = json.load(f)
-    except FileNotFoundError:
-        st.error("Coordinates file data/blueprint_coords.json not found on backend!")
+    # 3. FIX: Handle Coordinates JSON Path dynamically
+    # Look for it relative to frontend root, repo root, or deep backend paths
+    json_paths = [
+        os.path.join(BASE_DIR, "backend", "data", "blueprint_coords.json"), # If running from project root
+        os.path.join(os.path.dirname(FRONTEND_DIR), "backend", "data", "blueprint_coords.json"), # Relative step out
+        os.path.join(FRONTEND_DIR, "data", "blueprint_coords.json"), # Fallback: if you copied it to frontend
+        "../backend/data/blueprint_coords.json" # Raw string fallback
+    ]
+
+    equipment_nodes = None
+    for path in json_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, "r") as f:
+                    equipment_nodes = json.load(f)
+                break # Found it! Stop looking.
+            except Exception:
+                pass
+
+    if equipment_nodes is None:
+        st.error("Coordinates file `blueprint_coords.json` not found anywhere on the server paths!")
+        st.info(f"Current executing base directory context: `{BASE_DIR}`")
         return
 
     # 3. CSS for Overlays

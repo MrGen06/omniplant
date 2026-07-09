@@ -46,11 +46,10 @@ app.include_router(ingest.router, prefix="/api/ingest", tags=["PDF Ingestion"])
 
 # APPLICATION ENTRY POINT
 
-from services.ingest_synthetic_pdfs import ingest_pdf_path
+from services.ingest_synthetic_pdfs import ingest_uploaded_pdf
 if __name__ == "__main__":
     
-    ingest_pdf_path("sample_50_words (1).pdf")
-    
+    ingest_uploaded_pdf("sample_50_words (1).pdf")
     
 
     # uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

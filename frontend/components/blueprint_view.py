@@ -26,15 +26,32 @@ def get_image_base64(image_path):
 def render_blueprint_tab():
     st.subheader("Interactive P&ID Asset Explorer")
     
-    # FIX: Dynamically build the absolute path relative to this component file
-    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__)) # components/
-    FRONTEND_DIR = os.path.dirname(CURRENT_DIR) # frontend/
-    IMAGE_PATH = os.path.join(FRONTEND_DIR, "assets", "blueprint.png") # Adjust extension case if needed (.PNG)
+    # 1. Inspect the absolute directory layout of your live app
+    BASE_DIR = os.path.abspath(os.getcwd())
+    
+    # Let's check common directory paths where Streamlit might be executing from
+    option1 = os.path.join(BASE_DIR, "frontend", "assets", "blueprint.png")
+    option2 = os.path.join(BASE_DIR, "assets", "blueprint.png")
+    
+    # Determine which path actually exists on the cloud server
+    if os.path.exists(option1):
+        IMAGE_PATH = option1
+    elif os.path.exists(option2):
+        IMAGE_PATH = option2
+    else:
+        # If both fail, print the active layout so we know exactly where it is!
+        st.error(f"⚠️ File not found. Current executing directory: `{BASE_DIR}`")
+        st.info("Here is what the cloud container sees in the current folder:")
+        try:
+            st.code("\n".join(os.listdir(BASE_DIR)))
+        except Exception:
+            pass
+        return
 
-    # Convert the dynamic path to Base64
+    # Convert the found path to Base64
     img_b64 = get_image_base64(IMAGE_PATH)
     if not img_b64:
-        st.error(f"Missing blueprint image asset inside path: {IMAGE_PATH}")
+        st.error(f"Failed to decode image at: {IMAGE_PATH}")
         return
 
     # 2. Load Coordinates Mapping

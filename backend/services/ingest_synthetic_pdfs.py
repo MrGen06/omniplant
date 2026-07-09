@@ -1,366 +1,335 @@
-import argparse
-import hashlib
 import json
 import os
 import tempfile
-from pathlib import Path
 
+import dotenv
+import google.generativeai as genai
 import requests
-from dotenv import load_dotenv
-from llama_parse import LlamaParse
-from neo4j import GraphDatabase
+import re
+from connection.llama_parse import parser
+from connection.neo_4j import driver
 
 
-DEFAULT_HF_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-DEFAULT_VECTOR_INDEX = "omniplant_document_chunks"
-DEFAULT_NODE_LABEL = "DocumentChunk"
-DEFAULT_CHUNK_SIZE = 1200
-DEFAULT_CHUNK_OVERLAP = 150
+dotenv.load_dotenv()
+
+HEADERS = {
+    "Authorization": f"Bearer {os.getenv('HUGGINGFACEHUB_ACCESS_TOKEN')}",
+    "Content-Type": "application/json",
+}
+
+HF_API_URL = "https://router.huggingface.co/hf-inference/models/BAAI/bge-small-en"
+BATCH_SIZE = 16
+
+ALLOWED_RELATIONS = {
+    "HAS_PART",
+    "CONNECTED_TO",
+    "GOVERNS",
+    "LOCATED_IN",
+    "MONITORS",
+    "REQUIRES",
+    "USES",
+    "CAUSES",
+    "INDICATES",
+}
 
 
-def load_environment() -> None:
-    """Load backend environment variables from backend/.env."""
-    backend_root = Path(__file__).resolve().parent
-    load_dotenv(backend_root / ".env")
+# Gemini is used only for graph extraction, not for embeddings.
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = genai.GenerativeModel("gemini-2.5-flash")
 
 
-def get_required_env(name: str) -> str:
-    """Return a required environment variable or fail fast."""
-    value = os.getenv(name)
-    if not value:
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return value
+def build_extraction_prompt(text: str) -> str:
+    """Build the graph extraction prompt for Gemini."""
+    return f"""
+Extract entities and relationships from this industrial manual.
+allow only this relationship
+ALLOWED_RELATIONS = {
+    "HAS_PART",
+    "CONNECTED_TO",
+    "GOVERNS",
+    "LOCATED_IN",
+    "MONITORS",
+    "REQUIRES",
+    "USES",
+    "CAUSES",
+    "INDICATES",
+}
+
+Return ONLY valid JSON.
+
+Format:
+
+{{
+  "entities":[
+    {{
+      "name":"Pump-101",
+      "label":"Equipment"
+    }}
+  ],
+  "relationships":[
+    {{
+      "source":"Pump-101",
+      "type":"CONNECTED_TO",
+      "target":"Valve-10"
+    }}
+  ]
+}}
+
+Text:
+{text}
+"""
 
 
-def get_hugging_face_token() -> str:
-    """Return the Hugging Face token from the first supported environment variable."""
-    for candidate in ("HUGGINGFACE_API_TOKEN", "HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN", "HUGGINGFACEHUB_ACCESS_TOKEN"):
-        token = os.getenv(candidate)
-        if token:
-            return token
+def extract_graph(text: str) -> dict:
+    """Extract entities and relationships from chunk text."""
+    try:
+        response = model.generate_content(build_extraction_prompt(text))
+        if(response.text is None):
+            print("Gemini returned no text.")
+            return {"entities": [], "relationships": []}
+        # print(f"Graph Extraction Response: {response.text}")  # Safe preview
+        text = response.text.strip()
 
-    raise RuntimeError(
-        "Missing Hugging Face token. Set HUGGINGFACE_API_TOKEN, HF_TOKEN, HUGGINGFACEHUB_API_TOKEN, or HUGGINGFACEHUB_ACCESS_TOKEN."
+        # Remove ```json ... ```
+        match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+        if match:
+            text = match.group(1)
+
+        print(text)
+
+        return json.loads(text)
+      
+    except Exception as exc:
+        print(exc)
+        return {"entities": [], "relationships": []}
+
+
+def embed_batch(texts: list[str]) -> list[list[float]]:
+    """Generate embeddings for a batch of text chunks."""
+    payload = {
+        "inputs": texts,
+        "options": {
+            "use_cache": False,
+            "wait_for_model": True,
+        },
+    }
+
+    response = requests.post(HF_API_URL, headers=HEADERS, json=payload)
+    if response.status_code == 200:
+        return response.json()
+
+    print(f"Embedding Error: {response.status_code}")
+    print(response.text)
+    return []
+
+
+def parse_pdf(file_path: str):
+    """Parse a PDF using the shared LlamaParse client."""
+    if not parser:
+        print("LLAMA_CLOUD_API_KEY missing.")
+        return []
+
+    try:
+        print(f"Parsing {file_path}...")
+        documents = parser.load_data(file_path)
+
+        if not documents:
+            print("No documents returned.")
+            return []
+
+        print(f"Parsing complete. Total documents: {len(documents)}")
+        return documents
+    except Exception as exc:
+        print(f"Parsing Error: {exc}")
+        return []
+
+
+def chunk_documents(documents) -> list[str]:
+    """Extract plain text chunks from parsed documents."""
+    return [doc.text for doc in documents]
+
+
+def embed_in_batches(chunk_texts: list[str]) -> list[list[float]]:
+    """Embed chunks in fixed-size batches to keep the request flow simple."""
+    all_vectors: list[list[float]] = []
+
+    for start_index in range(0, len(chunk_texts), BATCH_SIZE):
+        batch = chunk_texts[start_index:start_index + BATCH_SIZE]
+        print(f"Embedding batch {start_index // BATCH_SIZE + 1} ({len(batch)} chunks)")
+
+        vectors = embed_batch(batch)
+        if vectors:
+            all_vectors.extend(vectors)
+
+    return all_vectors
+
+
+def create_document_node(session, filename: str) -> None:
+    """Create or reuse the main document node."""
+    session.run(
+        """
+        MERGE (d:Document {name: $filename})
+        """,
+        filename=filename,
     )
 
 
-def collect_pdf_files(input_path: Path) -> list[Path]:
-    """Return the PDFs found at a file path or within a directory tree."""
-    if input_path.is_file():
-        if input_path.suffix.lower() != ".pdf":
-            raise ValueError(f"Input file must be a PDF: {input_path}")
-        return [input_path]
+def create_chunk_node(session, filename: str, index: int, text: str, embedding: list[float]) -> None:
+    """Store one chunk node and link it to the document."""
+    session.run(
+        """
+        MATCH (d:Document {name:$filename})
 
-    if not input_path.exists():
-        raise FileNotFoundError(f"Input path does not exist: {input_path}")
+        MERGE (c:Chunk {chunk_id:$chunk_id})
 
-    pdf_files = sorted(path for path in input_path.rglob("*.pdf") if path.is_file())
-    if not pdf_files:
-        raise FileNotFoundError(f"No PDF files found under: {input_path}")
+        SET
+            c.text=$text,
+            c.embedding=$embedding
 
-    return pdf_files
-
-
-def create_parser() -> LlamaParse:
-    """Create a configured LlamaParse client."""
-    api_key = get_required_env("LLAMA_CLOUD_API_KEY")
-    return LlamaParse(api_key=api_key, result_type="markdown")
+        MERGE (d)-[:HAS_CHUNK]->(c)
+        """,
+        filename=filename,
+        chunk_id=f"{filename}_{index}",
+        text=text,
+        embedding=embedding,
+    )
 
 
-def parse_pdf(parser: LlamaParse, pdf_path: Path):
-    """Parse a single PDF file into LlamaParse documents."""
-    documents = parser.load_data(str(pdf_path))
-    if not documents:
-        raise RuntimeError(f"LlamaParse returned no documents for {pdf_path}")
-    return documents
+def create_entity_links(session, filename: str, chunk_index: int, graph: dict) -> None:
+    """Create entity nodes and connect them to the chunk."""
 
+    chunk_id = f"{filename}_{chunk_index}"
 
-def chunk_text(text: str, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_CHUNK_OVERLAP) -> list[str]:
-    """Split normalized text into overlapping chunks for embedding."""
-    cleaned = " ".join(text.split())
-    if not cleaned:
-        return []
+    for entity in graph.get("entities", []):
+        label = entity["label"].replace(" ", "_")
+        name = entity["name"].strip()
 
-    chunks: list[str] = []
-    start = 0
-    text_length = len(cleaned)
+        result = session.run(
+            f"""
+            MATCH (c:Chunk {{chunk_id: $chunk_id}})
 
-    while start < text_length:
-        end = min(start + chunk_size, text_length)
-        if end < text_length:
-            split_at = cleaned.rfind(" ", start, end)
-            if split_at > start + 200:
-                end = split_at
+            MERGE (e:{label} {{name: $name}})
 
-        chunk = cleaned[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
+            MERGE (c)-[:MENTIONS]->(e)
 
-        if end >= text_length:
-            break
-
-        start = max(end - overlap, 0)
-        while start < text_length and cleaned[start] == " ":
-            start += 1
-
-    return chunks
-
-
-def _pool_embedding_response(payload):
-    """Convert Hugging Face feature-extraction output into one flat vector."""
-    if not payload:
-        raise RuntimeError("Hugging Face returned an empty embedding payload")
-
-    first_item = payload[0]
-    if isinstance(first_item, (int, float)):
-        return [float(value) for value in payload]
-
-    if first_item and isinstance(first_item[0], (int, float)):
-        return [float(value) for value in first_item]
-
-    token_vectors = payload
-    vector_length = len(token_vectors[0])
-    pooled_vector = [0.0] * vector_length
-
-    for token_vector in token_vectors:
-        for index, value in enumerate(token_vector):
-            pooled_vector[index] += float(value)
-
-    token_count = max(len(token_vectors), 1)
-    return [value / token_count for value in pooled_vector]
-
-
-def embed_texts(texts: list[str], model_name: str, token: str) -> list[list[float]]:
-    """Request embeddings for each chunk from the Hugging Face inference API."""
-    if not texts:
-        return []
-
-    endpoint = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}"
-    headers = {"Authorization": f"Bearer {token}"}
-    embeddings: list[list[float]] = []
-
-    for text in texts:
-        response = requests.post(
-            endpoint,
-            headers=headers,
-            json={"inputs": text, "options": {"wait_for_model": True}},
-            timeout=120,
+            RETURN c.chunk_id AS chunk,
+                   labels(e) AS labels,
+                   e.name AS entity
+            """,
+            chunk_id=chunk_id,
+            name=name,
         )
-        response.raise_for_status()
-        embeddings.append(_pool_embedding_response(response.json()))
 
-    return embeddings
+        record = result.single()
+
+        if record is None:
+            print(f"❌ Chunk not found: {chunk_id}")
+        else:
+            print(f"✅ Linked {record['entity']} to {record['chunk']}")
 
 
-def build_chunk_records(pdf_path: Path, documents, model_name: str, token: str) -> list[dict]:
-    """Turn parsed documents into Neo4j-ready chunk payloads."""
-    records: list[dict] = []
+def create_relationship_links(session, graph: dict) -> None:
+    """Create relationships between extracted entities."""
 
-    for document_index, document in enumerate(documents):
-        text = getattr(document, "text", "") or ""
-        metadata = getattr(document, "metadata", {}) or {}
-        text_chunks = chunk_text(text)
-        embeddings = embed_texts(text_chunks, model_name=model_name, token=token)
+    for rel in graph.get("relationships", []):
 
-        for chunk_index, (chunk_text_value, embedding) in enumerate(zip(text_chunks, embeddings)):
-            fingerprint = hashlib.sha1(
-                f"{pdf_path.as_posix()}::{document_index}::{chunk_index}::{chunk_text_value}".encode("utf-8")
-            ).hexdigest()
-            records.append(
-                {
-                    "chunk_id": fingerprint,
-                    "source_file": pdf_path.name,
-                    "source_path": pdf_path.as_posix(),
-                    "document_index": document_index,
-                    "chunk_index": chunk_index,
-                    "page_number": metadata.get("page_number") or metadata.get("page") or metadata.get("page_label"),
-                    "title": metadata.get("file_name") or metadata.get("title") or pdf_path.stem,
-                    "text": chunk_text_value,
-                    "embedding": embedding,
-                }
+        rel_type = rel["type"]
+
+        if rel_type not in ALLOWED_RELATIONS:
+            print(f"⚠️ Skipping unsupported relation: {rel_type}")
+            continue
+
+        source = rel["source"].strip()
+        target = rel["target"].strip()
+
+        result = session.run(
+            f"""
+            MATCH (a {{name: $source}})
+            MATCH (b {{name: $target}})
+
+            MERGE (a)-[r:{rel_type}]->(b)
+
+            RETURN a.name AS source,
+                   type(r) AS relation,
+                   b.name AS target
+            """,
+            source=source,
+            target=target,
+        )
+
+        record = result.single()
+
+        if record is None:
+            print(f"❌ Could not create: {source} -[{rel_type}]-> {target}")
+        else:
+            print(
+                f"✅ {record['source']} -[{record['relation']}]-> {record['target']}"
             )
 
-    return records
 
-
-def ensure_vector_index(driver, index_name: str, label: str, dimension: int) -> None:
-    """Create the Neo4j vector index if it does not already exist."""
-    safe_index_name = index_name.replace("`", "")
-    query = f"""
-    CREATE VECTOR INDEX `{safe_index_name}` IF NOT EXISTS
-    FOR (n:{label}) ON (n.embedding)
-    OPTIONS {{
-      indexConfig: {{
-        `vector.dimensions`: {dimension},
-        `vector.similarity_function`: 'cosine'
-      }}
-    }}
-    """
-    with driver.session() as session:
-        session.run(query)
-
-
-def upsert_chunk_records(driver, records: list[dict], label: str) -> None:
-    """Insert or update chunk nodes in Neo4j."""
-    if not records:
-        return
-
-    merge_query = f"""
-    MERGE (chunk:{label} {{chunk_id: $chunk_id}})
-    SET chunk.source_file = $source_file,
-        chunk.source_path = $source_path,
-        chunk.document_index = $document_index,
-        chunk.chunk_index = $chunk_index,
-        chunk.page_number = $page_number,
-        chunk.title = $title,
-        chunk.text = $text,
-        chunk.embedding = $embedding,
-        chunk.updated_at = datetime()
-    """
-
-    with driver.session() as session:
-        for record in records:
-            session.run(merge_query, **record)
-
-
-def ingest_pdf_file(driver, parser: LlamaParse, pdf_path: Path, model_name: str, token: str, label: str, index_name: str) -> int:
-    """Parse, embed, and store one PDF file."""
-    documents = parse_pdf(parser, pdf_path)
-    records = build_chunk_records(pdf_path, documents, model_name=model_name, token=token)
-
-    if not records:
-        print(f"Skipped {pdf_path.name}: no embeddable chunks were produced.")
-        return 0
-
-    ensure_vector_index(driver, index_name, label, len(records[0]["embedding"]))
-    upsert_chunk_records(driver, records, label)
-    print(f"Ingested {len(records)} chunks from {pdf_path.name}")
-    return len(records)
-
-
-def build_argument_parser() -> argparse.ArgumentParser:
-    """Build the CLI argument parser for the ingestion job."""
-    parser = argparse.ArgumentParser(
-        description="Parse synthetic PDFs with LlamaParse, create Hugging Face embeddings, and push chunks into Neo4j."
-    )
-    parser.add_argument(
-        "path",
-        nargs="?",
-        default=Path(__file__).resolve().parent,
-        type=Path,
-        help="PDF file or directory to ingest. Defaults to the backend folder.",
-    )
-    parser.add_argument(
-        "--hf-model",
-        default=os.getenv("HUGGINGFACE_EMBEDDING_MODEL", DEFAULT_HF_MODEL),
-        help="Hugging Face inference model to use for feature extraction.",
-    )
-    parser.add_argument(
-        "--vector-index",
-        default=os.getenv("NEO4J_VECTOR_INDEX", DEFAULT_VECTOR_INDEX),
-        help="Neo4j vector index name to create or reuse.",
-    )
-    parser.add_argument(
-        "--node-label",
-        default=os.getenv("NEO4J_VECTOR_LABEL", DEFAULT_NODE_LABEL),
-        help="Neo4j node label used to store chunk vectors.",
-    )
-    return parser
-
-
-def main() -> None:
-    """Run the end-to-end ingestion flow."""
-    load_environment()
-    args = build_argument_parser().parse_args()
-
-    pdf_files = collect_pdf_files(args.path)
-    hf_token = get_hugging_face_token()
-    parser = create_parser()
-
-    neo4j_uri = get_required_env("NEO4J_URI")
-    neo4j_username = get_required_env("NEO4J_USERNAME")
-    neo4j_password = get_required_env("NEO4J_PASSWORD")
-
-    driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_username, neo4j_password))
-
-    total_chunks = 0
+def store_in_neo4j(filename: str, documents, all_vectors: list[list[float]]) -> None:
+    """Write the parsed chunks, embeddings, and graph data into Neo4j."""
     try:
         with driver.session() as session:
-            session.run("RETURN 1")
+            create_document_node(session, filename)
 
-        for pdf_path in pdf_files:
-            total_chunks += ingest_pdf_file(
-                driver,
-                parser,
-                pdf_path,
-                model_name=args.hf_model,
-                token=hf_token,
-                label=args.node_label,
-                index_name=args.vector_index,
-            )
-
-        print(json.dumps({"files": len(pdf_files), "chunks": total_chunks, "vector_index": args.vector_index}))
-    finally:
-        driver.close()
+            for index, (doc, embedding) in enumerate(zip(documents, all_vectors)):
+            
+                create_chunk_node(session, filename, index, doc.text, embedding)
+                graph = extract_graph(doc.text)
+                print(graph)
+                create_entity_links(session, filename, index, graph)
+                create_relationship_links(session, graph)
+    except Exception as exc:
+        print(f"Neo4j Ingestion Error: {exc}")
 
 
-def ingest_pdf_path(
-    pdf_path: Path,
-    *,
-    hf_model: str | None = None,
-    vector_index: str | None = None,
-    node_label: str | None = None,
-) -> int:
-    """Ingest a single PDF path from external callers such as API routes."""
-    load_environment()
+def all_flow(file_path: str, filename: str):
+    """Run the full ingest flow in a simple, readable sequence."""
+    documents = parse_pdf(file_path)
+    if not documents:
+        return [], []
 
-    hf_token = get_hugging_face_token()
-    parser = create_parser()
+    chunk_texts = chunk_documents(documents)
+    print(f"Total chunks: {len(chunk_texts)}")
+    # print(documents)
+    # print(chunk_texts)
 
-    neo4j_uri = get_required_env("NEO4J_URI")
-    neo4j_username = get_required_env("NEO4J_USERNAME")
-    neo4j_password = get_required_env("NEO4J_PASSWORD")
+    all_vectors = embed_in_batches(chunk_texts)
+    
+    print(f"Generated {len(all_vectors)} embeddings.")
 
-    driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_username, neo4j_password))
-    try:
-        return ingest_pdf_file(
-            driver,
-            parser,
-            pdf_path,
-            model_name=hf_model or os.getenv("HUGGINGFACE_EMBEDDING_MODEL", DEFAULT_HF_MODEL),
-            token=hf_token,
-            label=node_label or os.getenv("NEO4J_VECTOR_LABEL", DEFAULT_NODE_LABEL),
-            index_name=vector_index or os.getenv("NEO4J_VECTOR_INDEX", DEFAULT_VECTOR_INDEX),
-        )
-    finally:
-        driver.close()
+    store_in_neo4j(filename, documents, all_vectors)
+    return documents, all_vectors
+    
+    
 
 
-def ingest_uploaded_pdf(
-    file_bytes: bytes,
-    filename: str,
-    *,
-    hf_model: str | None = None,
-    vector_index: str | None = None,
-    node_label: str | None = None,
-) -> int:
-    """Persist an uploaded PDF to a temp file and ingest it."""
-    suffix = Path(filename).suffix or ".pdf"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-        temp_file.write(file_bytes)
-        temp_path = Path(temp_file.name)
+def ingest_uploaded_pdf(file_bytes: bytes, filename: str):
+    """Save an uploaded PDF temporarily, process it, and remove the temp file."""
+    temp_path = None
 
     try:
-        return ingest_pdf_path(
-            temp_path,
-            hf_model=hf_model,
-            vector_index=vector_index,
-            node_label=node_label,
-        )
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+            temp_file.write(file_bytes)
+            temp_path = temp_file.name
+
+        print(f"Temporary file created: {temp_path}")
+        documents, embeddings = all_flow(temp_path, filename)
+
+        return {
+            "documents": documents,
+            "embeddings": embeddings,
+            "count": len(documents),
+        }
+    except Exception as exc:
+        print(f"Processing Error: {exc}")
+        return {
+            "documents": [],
+            "embeddings": [],
+            "count": 0,
+        }
     finally:
-        if temp_path.exists():
-            temp_path.unlink()
-
-
-if __name__ == "__main__":
-    main()
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+            print(f"Deleted temporary file: {temp_path}")

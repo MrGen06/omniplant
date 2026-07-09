@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from components.auth_view import render_auth_tab
 from components.dashboard_view import render_dashboard_tab
 from components.kg_view import render_kg_tab
+from components.blueprint_view import render_blueprint_tab # ADDED THIS IMPORT
 
 load_dotenv()
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000")
@@ -43,11 +44,12 @@ with st.sidebar:
 
 st.title("Industrial Knowledge & Control Center")
 
-# Generate tabs smoothly
-tab_auth, tab_dashboard, tab_kg = st.tabs([
+# MODIFIED: Added "Interactive Blueprint" as a 4th option in the list
+tab_auth, tab_dashboard, tab_kg, tab_blueprint = st.tabs([
     "Authentication", 
     "Tier Dashboard", 
-    "Knowledge Graph & AI"
+    "Knowledge Graph & AI",
+    "Interactive P&ID Blueprint" # ADDED THIS TAB
 ])
 
 with tab_auth:
@@ -58,3 +60,6 @@ with tab_dashboard:
 
 with tab_kg:
     render_kg_tab()
+
+with tab_blueprint:
+    render_blueprint_tab() # ADDED THIS CALL TO RENDER THE BLUEPRINT VIEW

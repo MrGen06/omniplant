@@ -1,0 +1,41 @@
+WO_ID,Date_Issued,Equipment_Tag,Maint_Type,Issue_Description,Action_Taken,Tech_Name,Parts_Used,Cost_INR,Status
+WO-4001,2024-01-03,C-101,Inspection,"Routine compressor vibration survey","Recorded baseline vibration and bearing temperatures","Anil S.","None",4500,Closed
+WO-4002,2024-01-05,V-102,Preventive,"Sight glass showing discoloration","Replaced sight glass and gasket","Suresh P.","Sight glass;Gasket",6200,Closed
+WO-4003,2024-01-08,PT-204,Calibration,"Scheduled pressure transmitter calibration","Calibrated against certified pressure source","Deepak N.","Calibration kit",3800,Closed
+WO-4004,2024-01-11,FT-104,Calibration,"Quarterly flow transmitter verification","Adjusted zero and span settings","Deepak N.","None",4100,Closed
+WO-4005,2024-01-15,HX-201,Inspection,"External corrosion check","Cleaned surface and updated inspection record","Anil S.","Cleaning solvent",5200,Closed
+WO-4006,2024-01-19,P-302B,Preventive,"Bearing housing oil replacement","Drained and refilled lubricant","Vikram T.","ISO VG 68 Oil",7300,Closed
+WO-4007,2024-01-24,PCV-103,Inspection,"Valve travel inconsistency review","Verified actuator response within limits","Ramesh K.","None",3400,Closed
+WO-4008,2024-01-29,TT-203,Calibration,"Temperature transmitter drift check","Recalibrated transmitter","Deepak N.","Calibration kit",3600,Closed
+WO-4009,2024-02-02,M-101,Preventive,"Loose mounting hardware observed","Retorqued mounting fasteners","Suresh P.","None",2900,Closed
+WO-4010,2024-02-06,TK-401,Inspection,"Tank roof seal inspection","Inspected and documented condition","Anil S.","None",4700,Closed
+WO-4011,2024-02-09,CH-301,Preventive,"Cooler fins fouled with dust","Cleaned external cooling surfaces","Vikram T.","Cleaning solvent",5400,Closed
+WO-4012,2024-04-10,TCV-303,Preventive,"Routine bi-annual valve stem lubrication.","Cleaned stem and applied standard general-purpose synthetic grease Type-B. Cycled valve 3 times. Action signed off.","Ramesh K.","Type-B Grease",2800,Closed
+WO-4013,2024-02-14,PSV-205,Inspection,"Annual visual safety valve inspection","Verified seal wire and nameplate condition","Anil S.","None",5100,Closed
+WO-4014,2024-02-18,RX-202,Inspection,"Reactor external insulation survey","Repaired minor insulation damage","Suresh P.","Insulation patch",8600,Closed
+WO-4015,2024-02-22,C-101,Preventive,"Coupling alignment verification","Checked alignment and found acceptable","Vikram T.","None",6400,Closed
+WO-4016,2024-02-27,V-102,Inspection,"Drain valve leakage check","Tightened packing gland","Ramesh K.","Packing material",3100,Closed
+WO-4017,2024-03-01,P-302A,Preventive,"Routine lubrication inspection","Verified oil level and condition","Vikram T.","None",2500,Closed
+WO-4018,2024-03-05,FT-104,Inspection,"Signal fluctuation review","Checked wiring and terminals","Deepak N.","Terminal lugs",3300,Closed
+WO-4019,2024-03-08,HX-201,Preventive,"Tube-side differential pressure trending high","Performed chemical cleaning","Anil S.","Cleaning chemicals",18400,Closed
+WO-4020,2024-03-12,PCV-103,Calibration,"Position feedback verification","Recalibrated actuator positioner","Deepak N.","Calibration kit",4800,Closed
+WO-4021,2024-03-16,M-101,Inspection,"Housing vibration check","Measured vibration within limits","Suresh P.","None",2700,Closed
+WO-4022,2024-03-20,TT-203,Calibration,"Scheduled calibration activity","Adjusted transmitter output","Deepak N.","Calibration kit",3500,Closed
+WO-4023,2024-03-24,CH-301,Inspection,"Cooler support bracket review","Retightened support fasteners","Vikram T.","Fasteners",3900,Closed
+WO-4024,2024-03-27,TK-401,Preventive,"Level indication maintenance","Cleaned indicator chamber","Anil S.","Gasket",4600,Closed
+WO-4025,2024-04-02,PSV-205,Inspection,"Relief valve body inspection","No defects noted","Ramesh K.","None",4200,Closed
+WO-4026,2024-04-05,RX-202,Inspection,"Thermowell connection review","Verified no leakage present","Suresh P.","None",3700,Closed
+WO-4027,2024-04-12,C-101,Breakdown,"Minor oil seepage at inspection cover","Replaced cover gasket","Vikram T.","Gasket",9600,Closed
+WO-4028,2024-04-16,V-102,Preventive,"Internal cleaning during short outage","Removed sediment and cleaned vessel","Anil S.","Cleaning solvent",12500,Closed
+WO-4029,2024-04-19,PT-204,Calibration,"Pressure indication offset detected","Recalibrated and tested","Deepak N.","Calibration kit",4100,Closed
+WO-4030,2024-04-23,P-302B,Inspection,"Standby pump readiness run","Completed 30-minute test run","Ramesh K.","None",3200,Closed
+WO-4031,2024-04-27,HX-201,Inspection,"Flange leak survey","No leakage identified","Suresh P.","None",2900,Closed
+WO-4032,2024-05-01,FT-104,Calibration,"Monthly verification","Confirmed accuracy within tolerance","Deepak N.","None",3000,Closed
+WO-4033,2024-05-05,TCV-303,Inspection,"Valve stroke timing check","Measured full travel response","Ramesh K.","None",3400,Closed
+WO-4034,2024-05-09,M-101,Preventive,"Filter element replacement","Installed new filter element","Vikram T.","Filter element",7800,Closed
+WO-4035,2024-05-13,CH-301,Preventive,"Cooling performance degradation","Cleaned heat transfer surfaces","Anil S.","Cleaning chemicals",8900,Closed
+WO-4036,2024-05-17,PCV-103,Inspection,"Actuator air leak check","Replaced tubing fitting","Suresh P.","Air fitting",2600,Closed
+WO-4037,2024-05-21,TK-401,Inspection,"Tank shell visual survey","Documented coating condition","Anil S.","None",4400,Closed
+WO-4038,2024-05-24,RX-202,Inspection,"External support inspection","No abnormalities observed","Vikram T.","None",5300,Closed
+WO-4199,2024-05-28,P-302A,Breakdown,"Pump vibrating heavily; seal weeping ammonia.","Replaced primary mechanical seal. Noticed pump was past its 180-day OISD test window (last tested 210 days ago). Re-certified seal.","Ramesh K.","Primary mechanical seal",28600,Closed
+WO-4040,2024-06-05,PSV-205,Inspection,"Pre-shutdown safety valve review","Verified tag condition and accessibility","Suresh P.","None",3100,Closed

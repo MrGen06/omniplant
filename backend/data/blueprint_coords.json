@@ -1,0 +1,17 @@
+[
+{"equipment_id":"V-102","x_min":0.045,"y_min":0.395,"x_max":0.125,"y_max":0.700},
+{"equipment_id":"C-101","x_min":0.110,"y_min":0.255,"x_max":0.215,"y_max":0.610},
+{"equipment_id":"M-101","x_min":0.135,"y_min":0.210,"x_max":0.195,"y_max":0.420},
+{"equipment_id":"PCV-103","x_min":0.240,"y_min":0.405,"x_max":0.385,"y_max":0.585},
+{"equipment_id":"FT-104","x_min":0.305,"y_min":0.365,"x_max":0.425,"y_max":0.505},
+{"equipment_id":"HX-201","x_min":0.365,"y_min":0.430,"x_max":0.510,"y_max":0.610},
+{"equipment_id":"RX-202","x_min":0.455,"y_min":0.295,"x_max":0.625,"y_max":0.810},
+{"equipment_id":"PSV-205","x_min":0.555,"y_min":0.185,"x_max":0.665,"y_max":0.390},
+{"equipment_id":"TT-203","x_min":0.555,"y_min":0.400,"x_max":0.635,"y_max":0.560},
+{"equipment_id":"PT-204","x_min":0.555,"y_min":0.495,"x_max":0.635,"y_max":0.660},
+{"equipment_id":"CH-301","x_min":0.655,"y_min":0.385,"x_max":0.805,"y_max":0.560},
+{"equipment_id":"TCV-303","x_min":0.645,"y_min":0.475,"x_max":0.770,"y_max":0.690},
+{"equipment_id":"P-302A","x_min":0.725,"y_min":0.610,"x_max":0.845,"y_max":0.840},
+{"equipment_id":"P-302B","x_min":0.725,"y_min":0.745,"x_max":0.845,"y_max":0.975},
+{"equipment_id":"TK-401","x_min":0.825,"y_min":0.405,"x_max":0.985,"y_max":0.905}
+]

@@ -1,5 +1,6 @@
 import json
 import os
+from pyexpat.errors import messages
 import tempfile
 
 import dotenv
@@ -8,7 +9,7 @@ import requests
 import re
 from connection.llama_parse import parser
 from connection.neo_4j import driver
-
+from huggingface_hub import InferenceClient
 
 dotenv.load_dotenv()
 
@@ -34,8 +35,16 @@ ALLOWED_RELATIONS = {
 
 
 # Gemini is used only for graph extraction, not for embeddings.
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-2.5-flash")
+# genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+# model = genai.GenerativeModel("gemini-2.5-flash")
+
+client = InferenceClient(
+       
+        api_key=os.getenv("HUGGINGFACEHUB_ACCESS_TOKEN")
+    )
+
+
+
 
 
 def build_extraction_prompt(text: str) -> str:
@@ -83,12 +92,33 @@ Text:
 def extract_graph(text: str) -> dict:
     """Extract entities and relationships from chunk text."""
     try:
-        response = model.generate_content(build_extraction_prompt(text))
-        if(response.text is None):
-            print("Gemini returned no text.")
+        # response = model.generate_content(build_extraction_prompt(text))
+        response = client.chat.completions.create(
+        model="Qwen/Qwen2.5-7B-Instruct",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are an information extraction engine. "
+                    "Return ONLY valid JSON. "
+                    "Do not explain. Do not greet. "
+                    "Do not wrap the output in markdown."
+                ),
+            },
+            {
+                "role": "user",
+                "content": build_extraction_prompt(text),
+            },
+        ],
+        max_tokens=3000,
+    )
+
+        if(response.choices[0].message.content is None):
+            print("MODEL returned no text.")
             return {"entities": [], "relationships": []}
         # print(f"Graph Extraction Response: {response.text}")  # Safe preview
-        text = response.text.strip()
+        # print(f"Graph Extraction Response: {response}")  # Safe preview
+        text = response.choices[0].message.content.strip()
 
         # Remove ```json ... ```
         match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
@@ -278,8 +308,8 @@ def store_in_neo4j(filename: str, documents, all_vectors: list[list[float]]) -> 
                 create_chunk_node(session, filename, index, doc.text, embedding)
                 graph = extract_graph(doc.text)
                 print(graph)
-                create_entity_links(session, filename, index, graph)
-                create_relationship_links(session, graph)
+                # create_entity_links(session, filename, index, graph)
+                # create_relationship_links(session, graph)
     except Exception as exc:
         print(f"Neo4j Ingestion Error: {exc}")
 

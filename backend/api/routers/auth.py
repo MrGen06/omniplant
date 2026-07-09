@@ -12,6 +12,8 @@ class Token(BaseModel):
     access_token: str
     token_type: str
     role_tier: int
+    employee_id: str
+    name: str
 
 @router.post("/token", response_model=Token)
 async def login_for_access_token(
@@ -36,8 +38,10 @@ async def login_for_access_token(
     )
     
     return {
-        "access_token": access_token, 
+        "access_token": access_token,
         "token_type": "bearer",
-        "role_tier": user.role_tier
+        "role_tier": user.role_tier,
+        "employee_id": user.employee_id,
+        "name": user.name,
     }
 

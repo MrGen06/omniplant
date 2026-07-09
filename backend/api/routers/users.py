@@ -1,13 +1,42 @@
 from fastapi import APIRouter, HTTPException, Depends, status
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from jose import JWTError
 from core.database import get_db
 from models.user import UserModel
+from core.security import decode_access_token
 from core.security import create_access_token
 from typing import List
 
 router = APIRouter()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
+
+
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    try:
+        payload = decode_access_token(token)
+    except JWTError as exc:
+        raise credentials_exception from exc
+
+    employee_id = payload.get("sub")
+    if employee_id is None:
+        raise credentials_exception
+
+    user = db.query(UserModel).filter(UserModel.employee_id == employee_id).first()
+    if user is None:
+        raise credentials_exception
+
+    return user
 
 # --- Request Validation Schemas ---
 class UserCreate(BaseModel):
@@ -78,3 +107,9 @@ async def get_all_employees(db: Session = Depends(get_db)):
     """
     users = db.query(UserModel).all()
     return users
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_profile(current_user: UserModel = Depends(get_current_user)):
+    """Returns the authenticated employee profile for the frontend session."""
+    return current_user

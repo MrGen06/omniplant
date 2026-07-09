@@ -5,15 +5,19 @@ import base64
 import streamlit as st
 from neo4j import GraphDatabase
 from dotenv import load_dotenv
-from st_click_detector import click_detector  # Make sure to run: pip install st-click-detector
+from st_click_detector import click_detector
 
-# Explicitly target the backend .env file relative to root/frontend execution
+# Local development fallback path
 load_dotenv("../backend/.env")
 
-# Pull Neo4j configuration safely from environment
-NEO4J_URI = os.getenv("NEO4J_URI")
-NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+def get_neo4j_credentials():
+    """Safely fetches credentials from Streamlit Secrets (Cloud) or .env (Local)"""
+    # 1. Check Streamlit Cloud Secrets first
+    if "NEO4J_URI" in st.secrets:
+        return st.secrets["NEO4J_URI"], st.secrets.get("NEO4J_USERNAME", "neo4j"), st.secrets["NEO4J_PASSWORD"]
+    
+    # 2. Fallback to local environment variables
+    return os.getenv("NEO4J_URI"), os.getenv("NEO4J_USERNAME", "neo4j"), os.getenv("NEO4J_PASSWORD")
 
 @st.cache_data
 def get_image_base64(image_path):
@@ -27,12 +31,11 @@ def render_blueprint_tab():
     st.subheader("Interactive P&ID Asset Explorer")
     st.write("Click directly on any highlighted equipment tag on the blueprint drawing to fetch graph records.")
 
-    # 1. Setup Base Directories
+    # Paths layout handling
     BASE_DIR = os.path.abspath(os.getcwd())
-    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__)) # components/
-    FRONTEND_DIR = os.path.dirname(CURRENT_DIR) # frontend/
+    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+    FRONTEND_DIR = os.path.dirname(CURRENT_DIR)
 
-    # 2. Handle Image Path
     option1_img = os.path.join(FRONTEND_DIR, "assets", "blueprint.png")
     option2_img = os.path.join(BASE_DIR, "assets", "blueprint.png")
     IMAGE_PATH = option1_img if os.path.exists(option1_img) else option2_img
@@ -42,13 +45,11 @@ def render_blueprint_tab():
         st.error("Missing blueprint image asset inside 'assets/blueprint.png'!")
         return
 
-    # 3. FIX: Handle Coordinates JSON Path dynamically
-    # Look for it relative to frontend root, repo root, or deep backend paths
     json_paths = [
-        os.path.join(BASE_DIR, "backend", "data", "blueprint_coords.json"), # If running from project root
-        os.path.join(os.path.dirname(FRONTEND_DIR), "backend", "data", "blueprint_coords.json"), # Relative step out
-        os.path.join(FRONTEND_DIR, "data", "blueprint_coords.json"), # Fallback: if you copied it to frontend
-        "../backend/data/blueprint_coords.json" # Raw string fallback
+        os.path.join(BASE_DIR, "backend", "data", "blueprint_coords.json"),
+        os.path.join(os.path.dirname(FRONTEND_DIR), "backend", "data", "blueprint_coords.json"),
+        os.path.join(FRONTEND_DIR, "data", "blueprint_coords.json"),
+        "../backend/data/blueprint_coords.json"
     ]
 
     equipment_nodes = None
@@ -57,16 +58,15 @@ def render_blueprint_tab():
             try:
                 with open(path, "r") as f:
                     equipment_nodes = json.load(f)
-                break # Found it! Stop looking.
+                break
             except Exception:
                 pass
 
     if equipment_nodes is None:
         st.error("Coordinates file `blueprint_coords.json` not found anywhere on the server paths!")
-        st.info(f"Current executing base directory context: `{BASE_DIR}`")
         return
 
-    # 3. CSS for Overlays
+    # Render CSS and HTML Layout Map
     css_styles = """
     <style>
         .blueprint-container { position: relative; width: 100%; max-width: 1200px; margin: auto; }
@@ -88,7 +88,6 @@ def render_blueprint_tab():
     </style>
     """
 
-    # 4. Generate Interactive Elements
     html_elements = []
     for node in equipment_nodes:
         left = node["x_min"] * 100
@@ -102,17 +101,20 @@ def render_blueprint_tab():
 
     full_html = f'{css_styles}<div class="blueprint-container"><img src="data:image/png;base64,{img_b64}" class="blueprint-img" />{"".join(html_elements)}</div>'
 
-    # 5. Capture Clicks
+    # Capture click
     clicked_tag = click_detector(full_html)
 
-    # 6. Sidebar Graph Loading Logic
+    # Resolve credentials safely
+    uri, username, password = get_neo4j_credentials()
+
+    # Handle Sidebar display safely without crashing or looping
     if clicked_tag:
         st.sidebar.markdown("---")
         st.sidebar.header(f"Asset File: {clicked_tag}")
         st.sidebar.subheader("Live Knowledge Graph Status")
         
-        if not NEO4J_URI:
-            st.sidebar.error("Critical Error: NEO4J_URI is empty. Check your ../backend/.env path.")
+        if not uri:
+            st.sidebar.error("Config Error: Cloud Secrets are missing! Add NEO4J_URI to your Streamlit App Dashboard Settings.")
             return
             
         ctx = ssl.create_default_context()
@@ -120,7 +122,8 @@ def render_blueprint_tab():
         ctx.verify_mode = ssl.CERT_NONE
         
         try:
-            driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD), ssl_context=ctx)
+            # Connect using parameters resolved dynamically
+            driver = GraphDatabase.driver(uri, auth=(username, password), ssl_context=ctx)
             
             cypher_query = """
             MATCH (e:Equipment {id: $asset_id})-[:MAINTAINED_BY]->(w:WorkOrder)
@@ -135,7 +138,7 @@ def render_blueprint_tab():
             driver.close()
             
             if records:
-                st.sidebar.success(f"Found {len(records)} historical events linked to this asset:")
+                st.sidebar.success(f"Found {len(records)} events linked to this asset:")
                 for item in records:
                     with st.sidebar.expander(f"Ticket: {item['wo_id']}"):
                         st.write(f"**Date:** {item['date_issued']}")

@@ -1,7 +1,8 @@
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Body, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from services.ingest_synthetic_pdfs import ingest_uploaded_pdf
+from services.query_pipeline import pipeline
 
 
 router = APIRouter()
@@ -10,6 +11,11 @@ router = APIRouter()
 class IngestResponse(BaseModel):
     filename: str
     chunks_ingested: int
+
+
+class QueryRequest(BaseModel):
+    query: str
+    role: str = "Field Technician"
 
 
 
@@ -36,10 +42,37 @@ async def ingest_pdf_from_frontend(
             detail="Uploaded file is empty",
         )
 
-    ingest_result = ingest_uploaded_pdf(file_bytes, file.filename or "upload.pdf")
+    ingest_result = await ingest_uploaded_pdf(file_bytes, file.filename or "upload.pdf")
 
     return {
         "filename": file.filename or "upload.pdf",
         "chunks_ingested": ingest_result.get("count", 0),
       
     }
+    
+    
+    
+
+@router.post("/query")
+async def query_pdf_from_frontend(request: QueryRequest = Body(...)):
+    """Accept a query from the frontend and return the answer."""
+    try:
+        answer = await pipeline(request.query, request.role)
+
+        if answer is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No answer could be generated."
+            )
+
+        return {"answer": answer}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"An error occurred while processing the query: {str(e)}"
+        )
+
+  

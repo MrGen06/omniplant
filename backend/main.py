@@ -47,11 +47,18 @@ app.include_router(ingest.router, prefix="/api/ingest", tags=["PDF Ingestion"])
 # APPLICATION ENTRY POINT
 
 from services.ingest_synthetic_pdfs import all_flow
+from services.query_pipeline import pipeline
 if __name__ == "__main__":
     
-       all_flow("Pseudo_Pump_Manual.pdf","Pseudo_Pump_Manual.pdf")
+    # all_flow("Pseudo_Pump_Manual.pdf","Pseudo_Pump_Manual.pdf")
     # #  print(document[0].text)
     # #  print(embeddings[0])
   
 
     # uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    pipeline("The centrifugal pump-101 is vibrating. What should I do?", "Field Technician")
+    
+    
+    
+    
+    

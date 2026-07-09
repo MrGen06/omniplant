@@ -25,12 +25,16 @@ def get_image_base64(image_path):
 
 def render_blueprint_tab():
     st.subheader("Interactive P&ID Asset Explorer")
-    st.write("Click directly on any highlighted equipment tag on the blueprint drawing to fetch graph records.")
+    
+    # FIX: Dynamically build the absolute path relative to this component file
+    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__)) # components/
+    FRONTEND_DIR = os.path.dirname(CURRENT_DIR) # frontend/
+    IMAGE_PATH = os.path.join(FRONTEND_DIR, "assets", "blueprint.png") # Adjust extension case if needed (.PNG)
 
-    # 1. Base64 Image Conversion
-    img_b64 = get_image_base64("assets/blueprint.png")
+    # Convert the dynamic path to Base64
+    img_b64 = get_image_base64(IMAGE_PATH)
     if not img_b64:
-        st.error("Missing blueprint image asset inside 'assets/blueprint.png'!")
+        st.error(f"Missing blueprint image asset inside path: {IMAGE_PATH}")
         return
 
     # 2. Load Coordinates Mapping

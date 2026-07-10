@@ -7,7 +7,8 @@ import dotenv
 import requests
 import re
 from connection.llama_parse import parser
-from connection.neo_4j import driver
+# FIX 1: Import the connection module context rather than a static uninitialized value
+import connection.neo_4j as neo_4j 
 from huggingface_hub import InferenceClient
 
 dotenv.load_dotenv()
@@ -32,19 +33,16 @@ def create_embedding(query: str):
 
     response = requests.post(HF_API_URL, headers=HEADERS, json=payload)
     if response.status_code == 200:
-        # print("Embedding created successfully.", response.json())
         return response.json()
 
     print(f"Embedding Error: {response.status_code}")
-    
-
+    print(f"Response: {response.text}")
+    raise Exception(f"Failed to create embedding: {response.status_code} - {response.text}")
 
 
 client = InferenceClient(
     api_key=os.getenv("HUGGINGFACEHUB_ACCESS_TOKEN")
 )
-
-
 
 
 def extract_equipment(query):
@@ -88,29 +86,33 @@ def extract_equipment(query):
 
 
 def retrieve_chunks(session, embedding):
+    if not embedding:
+        print("Warning: No embedding provided to retrieve_chunks")
+        return []
 
-    query = """
-    CALL db.index.vector.queryNodes(
-        'chunkEmbedding',
-        3,
-        $embedding
-    )
+    try:
+        query = """
+        CALL db.index.vector.queryNodes(
+            'chunkEmbedding',
+            3,
+            $embedding
+        )
 
-    YIELD node, score
+        YIELD node, score
 
-    RETURN node, score
-    """
+        RETURN node, score
+        """
 
-    result = session.run(query, embedding=embedding)
- 
-    chunks = [dict(id=record['node']['chunk_id'],score=record['score']) for record in result]
-    return chunks
-
-
+        result = session.run(query, embedding=embedding)
+     
+        chunks = [dict(id=record['node']['chunk_id'],score=record['score']) for record in result]
+        return chunks
+    except Exception as e:
+        print(f"Error retrieving chunks: {str(e)}")
+        return []
 
 
 def get_equipment_context(session, equipment):
-
     result = session.run(
         """
         MATCH (e:Equipment)
@@ -140,9 +142,7 @@ def get_equipment_context(session, equipment):
     return result.single()
 
 
-
 def build_context(chunk_id, session):
-
     if not chunk_id:
         print("No chunks found for the given equipment.")
         return ""
@@ -158,64 +158,46 @@ def build_context(chunk_id, session):
     context = "\n".join([record["text"] for record in result])
     return context
 
-ROLE_PROMPTS = {
 
-    "Field Technician":
-    """
+ROLE_PROMPTS = {
+    "Field Technician": """
 You are an industrial maintenance assistant.
 
 Audience:
 Field Technician
 
 Always:
-
 - Explain step by step.
-
 - Mention tools required.
-
 - Mention calibration values.
-
 - Mention PPE.
-
 - Mention safety lockout/tagout.
-
 - Mention inspection sequence.
-
 - Keep answers practical.
 
 Never discuss business impact.
 """,
-
-    "Plant Manager":
-    """
+    "Plant Manager": """
 You are an industrial operations advisor.
 
 Audience:
 Plant Manager
 
 Always discuss
-
 - Production impact
-
 - Downtime
-
 - OEE
-
 - Risk
-
 - Maintenance scheduling
-
 - Resource planning
-
 - Preventive maintenance
 
 Avoid low-level repair instructions.
 """
 }
 
-def answer_query(query,role,context):
 
-    # Build the final prompt from the role guidance, retrieved context, and user question.
+def answer_query(query, role, context):
     prompt = f"""
         {ROLE_PROMPTS[role]}
 
@@ -244,8 +226,6 @@ def answer_query(query,role,context):
         Never invent maintenance procedures.
         """
 
-
-
     response = client.chat.completions.create(
         model="Qwen/Qwen2.5-7B-Instruct",
         messages=[
@@ -257,49 +237,61 @@ def answer_query(query,role,context):
     return response.choices[0].message.content
     
     
-async def pipeline(query, role=["Field Technician"]):
+async def pipeline(query, role="Field Technician"):
+    # FIX 2: Ensure that if role passes down as a single element list like ['Field Technician'], it strips out cleanly
+    if isinstance(role, list):
+        role = role[0] if len(role) > 0 else "Field Technician"
 
-    # Step 1: Turn the query into an embedding for semantic retrieval.
-    embedding = create_embedding(query)
+    # FIX 3: Dynamic evaluation to check that the connection module's live driver is up
+    if neo_4j.driver is None:
+        print("Driver is uninitialized. Re-executing system connection sync routine...")
+        neo_4j.connect_to_neo4j()
 
-    # Step 2: Pull the closest chunks from Neo4j using that embedding.
-    chunks = retrieve_chunks(driver.session(), embedding)
+    try:
+        # Step 1: Turn the query into an embedding for semantic retrieval.
+        embedding = create_embedding(query)
+    except Exception as e:
+        print(f"Error creating embedding: {str(e)}")
+        raise Exception(f"Failed to process query: {str(e)}")
+
+    # FIX 4: Use the dynamic module reference helper to initiate vector sessions safely
+    chunks = retrieve_chunks(neo_4j.driver.session(), embedding)
     chunk_id = [chunk['id'] for chunk in chunks]
 
-    # Step 3: Open a Neo4j session for equipment lookup and context expansion.
-    with driver.session() as session:
+    # Step 3: Open a session wrapper using the active connection channel reference
+    with neo_4j.driver.session() as session:
 
         # Step 4: Extract the equipment name referenced in the user query.
-        equipment_name = json.loads(extract_equipment(query))
+        raw_equipment = extract_equipment(query)
+        try:
+            equipment_name = json.loads(raw_equipment)
+        except Exception:
+            # Fallback parsing regex filter if LLM adds markdown triple backticks around JSON response block strings
+            cleaned_json = re.search(r"\{.*\}", raw_equipment, re.DOTALL)
+            equipment_name = json.loads(cleaned_json.group(0)) if cleaned_json else {}
+
         record = None
 
-        if not equipment_name:
-           print("No equipment found in query.")
-           
-
+        if not equipment_name or 'equipment' not in equipment_name:
+           print("No equipment found in query parsing evaluation sequence.")
         else:
-
-
-           
-
             # Step 5: Fetch additional context tied to the extracted equipment.
             record = get_equipment_context(session, equipment_name['equipment'])
 
-        # Step 6: Merge the semantic chunks with the equipment-linked chunks.
+        # Step 6: Merge semantic chunks with structural data mapping nodes properties
         if not record:
-            print(f"No context found for equipment: {equipment_name['equipment']}")
-        
+            print(f"No context found for equipment properties evaluation mapping match.")
         else:
-            print(f"Context retrieved for equipment: {record['chunk_id']}")
+            print(f"Context retrieved for equipment records count: {record['chunk_id']}")
+            chunk_id += record['chunk_id']
         
-        chunk_id+=record['chunk_id']
-        chunk_id=list(set(chunk_id))
+        chunk_id = list(set(chunk_id))
         print(f"Total Chunks Retrieved: {len(chunk_id)}")
 
-        # Step 7: Assemble the final prompt context from all selected chunks.
-        context = build_context(chunk_id,session)
+        # Step 7: Assemble context text strings mapping array
+        context = build_context(chunk_id, session)
 
-        # Step 8: Generate the final answer from the assembled context.
+        # Step 8: Generate final generative answers
         answer = answer_query(query, role, context)
         print(answer)
 

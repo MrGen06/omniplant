@@ -1,6 +1,10 @@
 import os
-from llama_parse import LlamaParse
 from dotenv import load_dotenv
+
+try:
+    from llama_parse import LlamaParse
+except ImportError:  # pragma: no cover - runtime fallback for environments without the package
+    LlamaParse = None
 
 # 1. DYNAMIC CONFIGURATION PATH LOOKUP
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -10,7 +14,7 @@ load_dotenv(dotenv_path=backend_env_path)
 LLAMA_CLOUD_API_KEY = os.getenv("LLAMA_CLOUD_API_KEY")
 
 # Pre-initialize parser instance safely
-if LLAMA_CLOUD_API_KEY:
+if LLAMA_CLOUD_API_KEY and LlamaParse is not None:
     parser = LlamaParse(
         api_key=LLAMA_CLOUD_API_KEY,
         result_type="markdown"

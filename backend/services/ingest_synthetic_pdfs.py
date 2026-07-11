@@ -7,10 +7,12 @@ import dotenv
 import requests
 import re
 from connection.llama_parse import parser
-from connection.neo_4j import driver
+import  connection.neo_4j as neo4j
 from huggingface_hub import InferenceClient
 
+
 dotenv.load_dotenv()
+
 
 HEADERS = {
     "Authorization": f"Bearer {os.getenv('HUGGINGFACEHUB_ACCESS_TOKEN')}",
@@ -197,7 +199,7 @@ def create_document_node(session, filename: str) -> None:
     """Create or reuse the main document node."""
     session.run(
         """
-        MERGE (d:Document {name: $filename})
+        MERGE (d:Document {name: toLower($filename)})
         """,
         filename=filename,
     )
@@ -207,9 +209,9 @@ def create_chunk_node(session, filename: str, index: int, text: str, embedding: 
     """Store one chunk node and link it to the document."""
     session.run(
         """
-        MATCH (d:Document {name:$filename})
+        MATCH (d:Document {name: $filename})
 
-        MERGE (c:Chunk {chunk_id:$chunk_id})
+        MERGE (c:Chunk {chunk_id: $chunk_id})
 
         SET
             c.text=$text,
@@ -217,8 +219,8 @@ def create_chunk_node(session, filename: str, index: int, text: str, embedding: 
 
         MERGE (d)-[:HAS_CHUNK]->(c)
         """,
-        filename=filename,
-        chunk_id=f"{filename}_{index}",
+        filename=filename.lower(),
+        chunk_id=f"{filename}_{index}".lower(),
         text=text,
         embedding=embedding,
     )
@@ -237,7 +239,7 @@ def create_entity_links(session, filename: str, chunk_index: int, graph: dict) -
             f"""
             MATCH (c:Chunk {{chunk_id: $chunk_id}})
 
-            MERGE (e:{label} {{name:toLower($name),id: $name}})
+            MERGE (e:{label} {{name:($name),id:($name)}})
 
             MERGE (c)-[:MENTIONS]->(e)
 
@@ -245,8 +247,8 @@ def create_entity_links(session, filename: str, chunk_index: int, graph: dict) -
                    labels(e) AS labels,
                    e.name AS entity
             """,
-            chunk_id=chunk_id,
-            name=name,
+            chunk_id=chunk_id.lower(),
+            name=name.lower(),
         )
 
         record = result.single()
@@ -273,7 +275,7 @@ def create_relationship_links(session, graph: dict) -> None:
 
         result = session.run(
             f"""
-            MATCH (a {{name: $source}})
+            MATCH (a {{name:$source}})
             MATCH (b {{name: $target}})
 
             MERGE (a)-[r:{rel_type}]->(b)
@@ -282,8 +284,8 @@ def create_relationship_links(session, graph: dict) -> None:
                    type(r) AS relation,
                    b.name AS target
             """,
-            source=source,
-            target=target,
+            source=source.lower(),
+            target=target.lower(),
         )
 
         record = result.single()
@@ -326,9 +328,11 @@ def create_vector_index(session):
         }
         """)
 
+global driver
 
 def all_flow(file_path: str, filename: str):
     """Run the full ingest flow in a simple, readable sequence."""
+   
     documents = parse_pdf(file_path)
     if not documents:
         return [], []
@@ -350,6 +354,9 @@ def all_flow(file_path: str, filename: str):
 
 
 async def ingest_uploaded_pdf(file_bytes: bytes, filename: str):
+    global driver
+    driver = neo4j.driver
+    print("driver",driver)
     """Save an uploaded PDF temporarily, process it, and remove the temp file."""
     temp_path = None
 

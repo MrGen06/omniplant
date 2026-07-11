@@ -22,7 +22,6 @@ if not NEO4J_URI:
 
 # Declare global driver placeholder so other pipeline modules can import it cleanly
 driver = None
-
 def connect_to_neo4j():
     global driver
     
@@ -38,7 +37,7 @@ def connect_to_neo4j():
     try:
         if is_production:
             # Production: Encrypted connection with strict SSL verification (Render cloud behavior)
-            driver = GraphDatabase.driver(
+            driver =   GraphDatabase.driver(
                 NEO4J_URI,
                 auth=(NEO4J_USERNAME, NEO4J_PASSWORD)
             )

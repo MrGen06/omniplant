@@ -197,11 +197,125 @@ Avoid low-level repair instructions.
 }
 
 
-def answer_query(query, role, context):
-    prompt = f"""
-        {ROLE_PROMPTS[role]}
+def classify_query(query: str) -> str:
+    """Route the query to the lightest Neo4j lookup that can answer it."""
+    normalized_query = query.lower()
 
-   
+    # Work-order history questions should bypass the manual chunk retriever.
+    workorder_keywords = (
+        "work order",
+        "workorder",
+        "history",
+        "previous",
+        "past",
+        "prior",
+        "repair history",
+        "maintenance history",
+    )
+    if any(keyword in normalized_query for keyword in workorder_keywords):
+        return "workorder_history"
+
+    manual_keywords = (
+        "manual",
+        "procedure",
+        "instructions",
+        "troubleshoot",
+        "troubleshooting",
+        "calibration",
+        "safety",
+        "inspection",
+        "step",
+        "steps",
+        "how to",
+    )
+    if any(keyword in normalized_query for keyword in manual_keywords):
+        return "manual"
+
+    return "manual"
+
+
+def build_workorder_context(session, equipment: str | None, query: str):
+    """Fetch only maintenance history data when the user asks for work orders."""
+    if equipment:
+        result = session.run(
+            """
+            MATCH (e:Equipment)
+            WHERE toLower(coalesce(e.id, e.name)) = toLower($equipment)
+
+            OPTIONAL MATCH (e)-[:MAINTAINED_BY]->(wo:WorkOrder)
+
+            RETURN collect(DISTINCT {
+                id: wo.id,
+                date: wo.date,
+                description: wo.description
+            }) AS workorders
+            """,
+            equipment=equipment,
+        )
+    else:
+        # If the equipment name is missing, first try a direct work-order text search.
+        result = session.run(
+            """
+            MATCH (e:Equipment)-[:MAINTAINED_BY]->(wo:WorkOrder)
+            WHERE toLower(wo.id) CONTAINS toLower($query)
+               OR toLower(wo.description) CONTAINS toLower($query)
+               OR toLower(coalesce(e.id, e.name)) CONTAINS toLower($query)
+            RETURN collect(DISTINCT {
+                equipment: coalesce(e.id, e.name),
+                id: wo.id,
+                date: wo.date,
+                description: wo.description
+            }) AS workorders
+            """,
+            query=query,
+        )
+
+        record = result.single()
+        if not record or not record["workorders"]:
+            # Generic history questions should still return actual maintenance records.
+            result = session.run(
+                """
+                MATCH (e:Equipment)-[:MAINTAINED_BY]->(wo:WorkOrder)
+                RETURN collect(DISTINCT {
+                    equipment: coalesce(e.id, e.name),
+                    id: wo.id,
+                    date: wo.date,
+                    description: wo.description
+                })[0..5] AS workorders
+                """
+            )
+
+    record = result.single()
+    if not record:
+        return ""
+
+    workorders = record["workorders"] or []
+    if not workorders:
+        return ""
+
+    formatted_lines = []
+    for workorder in workorders:
+        if not workorder:
+            continue
+
+        equipment_name = workorder.get("equipment")
+        header = [f"Work Order ID: {workorder.get('id', '')}"]
+        if equipment_name:
+            header.append(f"Equipment: {equipment_name}")
+        if workorder.get("date"):
+            header.append(f"Date: {workorder.get('date', '')}")
+
+        formatted_lines.append(
+            "\n".join(header + [f"Description: {workorder.get('description', '')}"])
+        )
+
+    return "\n\n".join(formatted_lines)
+
+
+def answer_query(query, role, context, query_mode="manual"):
+    if query_mode == "workorder_history":
+        prompt = f"""
+        {ROLE_PROMPTS[role]}
 
         Context:
         {context}
@@ -209,7 +323,30 @@ def answer_query(query, role, context):
         User Question:
         {query}
 
-        Provide:
+        Provide only the information that is available. Do not invent any information. If information is missing, explicitly say so:
+        1. Work Order Summary
+        2. Repeated Failure Pattern
+        3. Relevant Maintenance History
+        
+
+        INSTRUCTIONS
+        dont greet the user, dont apologize, dont ask for more information, dont ask for confirmation, dont ask for feedback, dont ask for follow-up questions, dont ask for clarification, dont ask for additional details, dont ask for more context, dont ask for more specifics.
+
+        Only use the supplied context.
+
+        If information is missing, explicitly say so.
+        """
+    else:
+        prompt = f"""
+        {ROLE_PROMPTS[role]}
+
+        Context:
+        {context}
+
+        User Question:
+        {query}
+
+        Provide only the information that is available. Do not invent any information. If information is missing, explicitly say so:
         1. Problem Summary
         2. Possible Cause
         3. Relevant Manual Information
@@ -225,7 +362,7 @@ def answer_query(query, role, context):
 
         Never invent maintenance procedures.
         """
-
+    
     response = client.chat.completions.create(
         model="Qwen/Qwen2.5-7B-Instruct",
         messages=[
@@ -237,7 +374,7 @@ def answer_query(query, role, context):
     return response.choices[0].message.content
     
     
-async def pipeline(query, role="Field Technician"):
+def pipeline(query, role="Field Technician"):
     # FIX 2: Ensure that if role passes down as a single element list like ['Field Technician'], it strips out cleanly
     if isinstance(role, list):
         role = role[0] if len(role) > 0 else "Field Technician"
@@ -247,52 +384,73 @@ async def pipeline(query, role="Field Technician"):
         print("Driver is uninitialized. Re-executing system connection sync routine...")
         neo_4j.connect_to_neo4j()
 
+    query_mode = classify_query(query)
+
     try:
-        # Step 1: Turn the query into an embedding for semantic retrieval.
-        embedding = create_embedding(query)
-    except Exception as e:
-        print(f"Error creating embedding: {str(e)}")
-        raise Exception(f"Failed to process query: {str(e)}")
+        # Step 1: Open a session wrapper using the active connection channel reference.
+        with neo_4j.driver.session() as session:
 
-    # FIX 4: Use the dynamic module reference helper to initiate vector sessions safely
-    chunks = retrieve_chunks(neo_4j.driver.session(), embedding)
-    chunk_id = [chunk['id'] for chunk in chunks]
+            # Step 2: Extract the equipment name referenced in the user query.
+            raw_equipment = extract_equipment(query)
+            try:
+                equipment_name = json.loads(raw_equipment)
+            except Exception:
+                # Fallback parsing regex filter if LLM adds markdown triple backticks around JSON response block strings
+                cleaned_json = re.search(r"\{.*\}", raw_equipment, re.DOTALL)
+                equipment_name = json.loads(cleaned_json.group(0)) if cleaned_json else {}
 
-    # Step 3: Open a session wrapper using the active connection channel reference
-    with neo_4j.driver.session() as session:
+            equipment = equipment_name.get("equipment") if equipment_name else None
+            if not equipment:
+                print("No equipment found in query parsing evaluation sequence.")
 
-        # Step 4: Extract the equipment name referenced in the user query.
-        raw_equipment = extract_equipment(query)
-        try:
-            equipment_name = json.loads(raw_equipment)
-        except Exception:
-            # Fallback parsing regex filter if LLM adds markdown triple backticks around JSON response block strings
-            cleaned_json = re.search(r"\{.*\}", raw_equipment, re.DOTALL)
-            equipment_name = json.loads(cleaned_json.group(0)) if cleaned_json else {}
+            if query_mode == "workorder_history":
+                print("Query classified as work-order history. Bypassing manual chunk retrieval.")
+                context = build_workorder_context(session, equipment, query)
+                print(f"Work-order context retrieved: {context}")
+                if not context:
+                    print("No work-order history found for the supplied query.")
+                    return (
+                        "No work-order history was found in Neo4j for this query. "
+                        "Try including an equipment tag, work order ID, or a more specific maintenance term."
+                    )
+            else:
+                try:
+                    print("Query classified as manual. Proceeding with embedding and chunk retrieval.")
+                    # Step 3: Turn the query into an embedding for semantic retrieval only when manuals are needed.
+                    embedding = create_embedding(query)
+                except Exception as e:
+                    print(f"Error creating embedding: {str(e)}")
+                    raise Exception(f"Failed to process query: {str(e)}")
 
-        record = None
-
-        if not equipment_name or 'equipment' not in equipment_name:
-           print("No equipment found in query parsing evaluation sequence.")
-        else:
-            # Step 5: Fetch additional context tied to the extracted equipment.
-            record = get_equipment_context(session, equipment_name['equipment'])
-
-        # Step 6: Merge semantic chunks with structural data mapping nodes properties
-        if not record:
-            print(f"No context found for equipment properties evaluation mapping match.")
-        else:
-            print(f"Context retrieved for equipment records count: {record['chunk_id']}")
-            chunk_id += record['chunk_id']
+                # Step 4: Use the vector index only for manual-style questions.
+                chunks = retrieve_chunks(neo_4j.driver.session(), embedding)
+                chunk_id = [chunk['id'] for chunk in chunks]
         
-        chunk_id = list(set(chunk_id))
-        print(f"Total Chunks Retrieved: {len(chunk_id)}")
+                # Step 5: Fetch additional context tied to the extracted equipment.
+                record = None
+                if not equipment:
+                    print("No equipment found for manual context enrichment.")
+                else:
+                    record = get_equipment_context(session, equipment)
 
-        # Step 7: Assemble context text strings mapping array
-        context = build_context(chunk_id, session)
+                # Step 6: Merge semantic chunks with structural data mapping nodes properties.
+                if not record:
+                    print(f"No context found for equipment properties evaluation mapping match.")
+                else:
+                    print(f"Context retrieved for equipment records count: {record['chunk_id']}")
+                    chunk_id += record['chunk_id']
 
-        # Step 8: Generate final generative answers
-        answer = answer_query(query, role, context)
-        print(answer)
+                chunk_id = list(set(chunk_id))
+                print(f"Total Chunks Retrieved: {len(chunk_id)}")
 
-        return answer
+                # Step 7: Assemble context text strings mapping array.
+                context = build_context(chunk_id, session)
+
+            # Step 8: Generate final generative answers.
+            answer = answer_query(query, role, context, query_mode)
+            print(answer)
+
+            return answer
+    except Exception as e:
+        print(f"Error processing query: {str(e)}")
+        raise

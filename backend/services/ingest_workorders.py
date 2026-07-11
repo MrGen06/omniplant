@@ -49,10 +49,10 @@ def insert_workorders_batch(tx, batch):
     UNWIND $batch AS row
     
     // 1. Create or match the Equipment node
-    MERGE (e:Equipment {id: row.Equipment_Tag, name: toLower(row.Equipment_Tag)})
+    MERGE (e:Equipment {id: toLower(row.Equipment_Tag), name: toLower(row.Equipment_Tag)})
     
     // 2. Create or match the WorkOrder node
-    MERGE (w:WorkOrder {id: row.WO_ID})
+    MERGE (w:WorkOrder {id: toLower(row.WO_ID)})
     SET w.description = row.Issue_Description,
         w.date = row.Date_Issued
         
@@ -97,11 +97,14 @@ def push_to_neo4j(records):
             
     driver.close()
     print("Graph ingestion complete!")
-
-if __name__ == "__main__":
-    # Execute the pipeline
+    
+def main():
+    """Main execution flow: Clean CSV and push to Neo4j."""
     try:
         cleaned_records = clean_data(CSV_FILE_PATH)
         push_to_neo4j(cleaned_records)
     except Exception as e:
         print(f"An error occurred during the pipeline execution: {e}")
+
+if __name__ == "__main__":
+    main()

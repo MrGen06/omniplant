@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from st_click_detector import click_detector
 
 # Local development fallback path
-load_dotenv("../backend/.env")
+load_dotenv()
 
 def get_neo4j_credentials():
     """Safely fetches credentials from Streamlit Secrets (Cloud) or .env (Local)"""
@@ -117,13 +117,15 @@ def render_blueprint_tab():
             st.sidebar.error("Config Error: Cloud Secrets are missing! Add NEO4J_URI to your Streamlit App Dashboard Settings.")
             return
             
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+       
         
         try:
             # Connect using parameters resolved dynamically
-            driver = GraphDatabase.driver(uri, auth=(username, password), ssl_context=ctx)
+            driver = GraphDatabase.driver(
+            uri, 
+            auth=(username, password),
+          
+        )
             
             cypher_query = """
             MATCH (e:Equipment {id: $asset_id})-[:MAINTAINED_BY]->(w:WorkOrder)
@@ -132,7 +134,9 @@ def render_blueprint_tab():
             """
             
             with driver.session() as session:
-                result = session.run(cypher_query, asset_id=clicked_tag)
+                print(f"Executing Cypher Query for Asset ID: {clicked_tag}")
+                
+                result = session.run(cypher_query, asset_id=(clicked_tag).lower())
                 records = [row for row in result]
                 
             driver.close()

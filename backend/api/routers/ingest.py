@@ -56,7 +56,7 @@ async def query_pdf_from_frontend(request: QueryRequest = Body(...)):
             role_name = "Plant Manager" if int(role_name) >= 2 else "Field Technician"
 
         # FIX: Explicitly await the coroutine so it returns the actual string response!
-        answer = await pipeline(request.query, role_name)
+        answer = pipeline(request.query, role_name)
 
         if answer is None:
             raise HTTPException(

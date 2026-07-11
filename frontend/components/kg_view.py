@@ -24,8 +24,24 @@ def render_kg_tab():
         if st.button("Process & Parse Document", use_container_width=True):
             if uploaded_file is not None:
                 with st.spinner("Extracting schemas with LlamaParse & injecting to Neo4j..."):
-                    # Future integration target
-                    st.success(f"Successfully processed '{uploaded_file.name}' into the network cluster!")
+                    try:
+                        # Send the PDF to the backend for processing
+                        files = {
+                                "file": (
+                                    uploaded_file.name,
+                                    uploaded_file.getvalue(),
+                                    "application/pdf",
+                                )
+                            }
+                        headers = {"Authorization": f"Bearer {st.session_state['access_token']}"}
+                        response = requests.post(f"{BACKEND_API_URL}/api/ingest/pdf", files=files, headers=headers)
+                        
+                        if response.status_code == 200:
+                            st.success("Document processed and ingested successfully!")
+                        else:
+                            st.error(f"Backend Error {response.status_code}: {response.text}")
+                    except Exception as e:
+                        st.error(f"Connection failed. Is the backend running? Error: {e}")
             else:
                 st.error("Please select a valid PDF file first.")
 

@@ -43,6 +43,8 @@ def clean_data(file_path):
     return records
 
 def insert_workorders_batch(tx, batch):
+    
+    # print(f"Inserting batch of {batch} records into Neo4j...")
     """Stage 2 & 3: The Cypher UNWIND query"""
     # FIXED: Combined mapping variables to exactly match Pandas dictionary keys
     cypher_query = """
@@ -90,6 +92,7 @@ def push_to_neo4j(records):
     total_records = len(records)
     
     with driver.session() as session:
+        # print(records)
         for i in range(0, total_records, batch_size):
             batch = records[i : i + batch_size]
             session.execute_write(insert_workorders_batch, batch)

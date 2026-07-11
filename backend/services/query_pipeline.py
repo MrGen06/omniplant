@@ -197,43 +197,6 @@ Avoid low-level repair instructions.
 }
 
 
-def classify_query(query: str) -> str:
-    """Route the query to the lightest Neo4j lookup that can answer it."""
-    normalized_query = query.lower()
-
-    # Work-order history questions should bypass the manual chunk retriever.
-    workorder_keywords = (
-        "work order",
-        "workorder",
-        "history",
-        "previous",
-        "past",
-        "prior",
-        "repair history",
-        "maintenance history",
-    )
-    if any(keyword in normalized_query for keyword in workorder_keywords):
-        return "workorder_history"
-
-    manual_keywords = (
-        "manual",
-        "procedure",
-        "instructions",
-        "troubleshoot",
-        "troubleshooting",
-        "calibration",
-        "safety",
-        "inspection",
-        "step",
-        "steps",
-        "how to",
-    )
-    if any(keyword in normalized_query for keyword in manual_keywords):
-        return "manual"
-
-    return "manual"
-
-
 def build_workorder_context(session, equipment: str | None, query: str):
     """Fetch only maintenance history data when the user asks for work orders."""
     if equipment:
@@ -312,56 +275,36 @@ def build_workorder_context(session, equipment: str | None, query: str):
     return "\n\n".join(formatted_lines)
 
 
-def answer_query(query, role, context, query_mode="manual"):
-    if query_mode == "workorder_history":
-        prompt = f"""
-        {ROLE_PROMPTS[role]}
+def answer_query(query, role, context):
+    prompt = f"""
+    {ROLE_PROMPTS[role]}
 
-        Context:
-        {context}
+    Context:
+    {context}
 
-        User Question:
-        {query}
+    User Question:
+    {query}
 
-        Provide only the information that is available. Do not invent any information. If information is missing, explicitly say so:
-        1. Work Order Summary
-        2. Repeated Failure Pattern
-        3. Relevant Maintenance History
-        
+    Use any relevant manual or work-order history information that appears in the context.
+    Provide only the information that is available. Do not invent any information. If information is missing, explicitly say so.
 
-        INSTRUCTIONS
-        dont greet the user, dont apologize, dont ask for more information, dont ask for confirmation, dont ask for feedback, dont ask for follow-up questions, dont ask for clarification, dont ask for additional details, dont ask for more context, dont ask for more specifics.
+    Provide:
+    1. Problem Summary
+    2. Possible Cause
+    3. Relevant Manual Information
+    4. Relevant Work Order History
+    5. Recommended Steps
+    6. Safety Precautions
 
-        Only use the supplied context.
+    INSTRUCTIONS
+    dont greet the user, dont apologize, dont ask for more information, dont ask for confirmation, dont ask for feedback, dont ask for follow-up questions, dont ask for clarification, dont ask for additional details, dont ask for more context, dont ask for more specifics, dont ask for more information about the equipment, dont ask for more information about the issue, dont ask for more information about the symptoms, dont ask for more information about the environment, dont ask for more information about the conditions, dont ask for more information about the operating parameters, dont ask for more information about the maintenance history, dont ask for more information about the previous repairs, dont ask for more information about the previous inspections, dont ask for more information about the previous failures, dont ask for more information about the previous issues, dont ask for more information about the previous problems.
 
-        If information is missing, explicitly say so.
-        """
-    else:
-        prompt = f"""
-        {ROLE_PROMPTS[role]}
+    Only use the supplied context.
 
-        Context:
-        {context}
+    If information is missing, explicitly say so.
 
-        User Question:
-        {query}
-
-        Provide only the information that is available. Do not invent any information. If information is missing, explicitly say so:
-        1. Problem Summary
-        2. Possible Cause
-        3. Relevant Manual Information
-        4. Recommended Steps
-        5. Safety Precautions
-        
-        INSTRUCTIONS
-        dont greet the user, dont apologize, dont ask for more information, dont ask for confirmation, dont ask for feedback, dont ask for follow-up questions, dont ask for clarification, dont ask for additional details, dont ask for more context, dont ask for more specifics, dont ask for more information about the equipment, dont ask for more information about the issue, dont ask for more information about the symptoms, dont ask for more information about the environment, dont ask for more information about the conditions, dont ask for more information about the operating parameters, dont ask for more information about the maintenance history, dont ask for more information about the previous repairs, dont ask for more information about the previous inspections, dont ask for more information about the previous failures, dont ask for more information about the previous issues, dont ask for more information about the previous problems.
-
-        Only use the supplied context.
-
-        If information is missing, explicitly say so.
-
-        Never invent maintenance procedures.
-        """
+    Never invent maintenance procedures.
+    """
     
     response = client.chat.completions.create(
         model="Qwen/Qwen2.5-7B-Instruct",
@@ -384,8 +327,6 @@ def pipeline(query, role="Field Technician"):
         print("Driver is uninitialized. Re-executing system connection sync routine...")
         neo_4j.connect_to_neo4j()
 
-    query_mode = classify_query(query)
-
     try:
         # Step 1: Open a session wrapper using the active connection channel reference.
         with neo_4j.driver.session() as session:
@@ -403,51 +344,50 @@ def pipeline(query, role="Field Technician"):
             if not equipment:
                 print("No equipment found in query parsing evaluation sequence.")
 
-            if query_mode == "workorder_history":
-                print("Query classified as work-order history. Bypassing manual chunk retrieval.")
-                context = build_workorder_context(session, equipment, query)
-                print(f"Work-order context retrieved: {context}")
-                if not context:
-                    print("No work-order history found for the supplied query.")
-                    return (
-                        "No work-order history was found in Neo4j for this query. "
-                        "Try including an equipment tag, work order ID, or a more specific maintenance term."
-                    )
+            try:
+                print("Retrieving manual context with embeddings and chunk lookup.")
+                embedding = create_embedding(query)
+            except Exception as e:
+                print(f"Error creating embedding: {str(e)}")
+                raise Exception(f"Failed to process query: {str(e)}")
+
+            chunks = retrieve_chunks(neo_4j.driver.session(), embedding)
+            chunk_id = [chunk['id'] for chunk in chunks]
+
+            record = None
+            if not equipment:
+                print("No equipment found for manual context enrichment.")
             else:
-                try:
-                    print("Query classified as manual. Proceeding with embedding and chunk retrieval.")
-                    # Step 3: Turn the query into an embedding for semantic retrieval only when manuals are needed.
-                    embedding = create_embedding(query)
-                except Exception as e:
-                    print(f"Error creating embedding: {str(e)}")
-                    raise Exception(f"Failed to process query: {str(e)}")
+                record = get_equipment_context(session, equipment)
 
-                # Step 4: Use the vector index only for manual-style questions.
-                chunks = retrieve_chunks(neo_4j.driver.session(), embedding)
-                chunk_id = [chunk['id'] for chunk in chunks]
-        
-                # Step 5: Fetch additional context tied to the extracted equipment.
-                record = None
-                if not equipment:
-                    print("No equipment found for manual context enrichment.")
-                else:
-                    record = get_equipment_context(session, equipment)
+            if not record:
+                print("No context found for equipment properties evaluation mapping match.")
+            else:
+                print(f"Context retrieved for equipment records count: {record['chunk_id']}")
+                chunk_id += record['chunk_id']
 
-                # Step 6: Merge semantic chunks with structural data mapping nodes properties.
-                if not record:
-                    print(f"No context found for equipment properties evaluation mapping match.")
-                else:
-                    print(f"Context retrieved for equipment records count: {record['chunk_id']}")
-                    chunk_id += record['chunk_id']
+            chunk_id = list(set(chunk_id))
+            print(f"Total Chunks Retrieved: {len(chunk_id)}")
 
-                chunk_id = list(set(chunk_id))
-                print(f"Total Chunks Retrieved: {len(chunk_id)}")
+            manual_context = build_context(chunk_id, session)
+            workorder_context = build_workorder_context(session, equipment, query)
 
-                # Step 7: Assemble context text strings mapping array.
-                context = build_context(chunk_id, session)
+            combined_context_parts = []
+            if manual_context:
+                combined_context_parts.append("Manual Context:\n" + manual_context)
+            if workorder_context:
+                combined_context_parts.append("Work Order History:\n" + workorder_context)
+
+            context = "\n\n".join(combined_context_parts)
+            if not context:
+                print("No manual or work-order context found for the supplied query.")
+                return (
+                    "No manual or work-order history was found in Neo4j for this query. "
+                    "Try including an equipment tag, work order ID, or a more specific maintenance term."
+                )
 
             # Step 8: Generate final generative answers.
-            answer = answer_query(query, role, context, query_mode)
+            answer = answer_query(query, role, context)
             print(answer)
 
             return answer

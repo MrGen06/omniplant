@@ -1,4 +1,5 @@
 import os
+import requests
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -7,9 +8,10 @@ from components.auth_view import render_auth_tab
 from components.dashboard_view import render_dashboard_tab
 from components.kg_view import render_kg_tab
 from components.blueprint_view import render_blueprint_tab # ADDED THIS IMPORT
-
+import requests
 load_dotenv()
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000")
+print( requests.get(f"{BACKEND_API_URL}") )
 
 st.set_page_config(
     page_title="OmniPlant.AI Portal",

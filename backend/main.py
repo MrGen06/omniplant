@@ -41,6 +41,9 @@ async def lifespan(app: FastAPI):
 
 # INITIALIZE THE SINGLE CORE FASTAPI INSTANCE WITH LIFESPAN CONTROL
 app = FastAPI(title="OmniPlant.AI Production-Level Engine", lifespan=lifespan)
+@app.get("/")
+def home():
+    return {"message": "Hello"}
 
 # MOUNT ARCHITECTURAL ROUTERS
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
@@ -55,13 +58,14 @@ import asyncio
 
 
 if __name__ == "__main__":
-    # connect_to_neo4j()  # Ensure Neo4j driver is initialized before starting the server
-    # all_flow("Pseudo_Pump_Manual.pdf", "Pseudo_Pump_Manual")
+        uvicorn.run(app, host="127.0.0.1", port=8000)
+#     # connect_to_neo4j()  # Ensure Neo4j driver is initialized before starting the server
+#     # all_flow("Pseudo_Pump_Manual.pdf", "Pseudo_Pump_Manual")
     # ingest_workorders.main()
     
     
     
-    # Allows execution via direct python selection: 'python main.py'
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-    # pipeline("what is the history of workorder on c-101?")
+#     # Allows execution via direct python selection: 'python main.py'
+       
+#     # pipeline("what is the history of workorder on c-101?")
    

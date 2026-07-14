@@ -1,10 +1,11 @@
-import os
 import streamlit as st
 import requests
 from datetime import datetime
 
+from components.api_config import get_backend_api_url
+
 # Point this to your Render backend or localhost during testing
-BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000")
+BACKEND_API_URL = get_backend_api_url()
 
 def render_kg_tab():
     # 1. Guardrail Protection

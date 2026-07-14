@@ -43,25 +43,33 @@ def clean_data(file_path):
     return records
 
 def insert_workorders_batch(tx, batch):
-    
-    # print(f"Inserting batch of {batch} records into Neo4j...")
-    """Stage 2 & 3: The Cypher UNWIND query"""
-    # FIXED: Combined mapping variables to exactly match Pandas dictionary keys
     cypher_query = """
     UNWIND $batch AS row
-    
+
     // 1. Create or match the Equipment node
-    MERGE (e:Equipment {id: toLower(row.Equipment_Tag), name: toLower(row.Equipment_Tag)})
-    
+    MERGE (e:Equipment {
+        id: toLower(row.Equipment_Tag),
+        name: toLower(row.Equipment_Tag)
+    })
+
     // 2. Create or match the WorkOrder node
     MERGE (w:WorkOrder {id: toLower(row.WO_ID)})
-    SET w.description = row.Issue_Description,
-        w.date = row.Date_Issued
-        
+    SET
+        w.description = row.Issue_Description,
+        w.date = row.Date_Issued,
+        w.Technician_Name = row.Tech_Name,
+        w.Maintenance_Type = row.Maint_Type,
+        w.Action_Taken = row.Action_Taken,
+        w.Parts_Used = row.Parts_Used,
+        w.Cost_INR = row.Cost_INR,
+        w.Status = row.Status
+
     // 3. Establish the relationship
     MERGE (e)-[:MAINTAINED_BY]->(w)
+
+    RETURN w.id AS id
     """
-    tx.run(cypher_query, batch=batch)
+    return tx.run(cypher_query, batch=batch)
 
 def push_to_neo4j(records):
     print("Connecting to Neo4j database...")

@@ -1,6 +1,7 @@
 import os
 import streamlit as st
 import requests
+from datetime import datetime
 
 # Point this to your Render backend or localhost during testing
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000")
@@ -12,6 +13,9 @@ def render_kg_tab():
         return
 
     st.subheader("Industrial AI Engine & Document Parser")
+
+    if "uploaded_pdfs" not in st.session_state:
+        st.session_state["uploaded_pdfs"] = []
     
     # Adjusted column width slightly to give the chat interface more breathing room
     col_ingest, col_query = st.columns([1, 1.5]) 
@@ -38,6 +42,12 @@ def render_kg_tab():
                         
                         if response.status_code == 200:
                             st.success("Document processed and ingested successfully!")
+                            st.session_state["uploaded_pdfs"].append(
+                                {
+                                    "filename": uploaded_file.name,
+                                    "uploaded_at": datetime.now().isoformat(timespec="seconds"),
+                                }
+                            )
                         else:
                             st.error(f"Backend Error {response.status_code}: {response.text}")
                     except Exception as e:

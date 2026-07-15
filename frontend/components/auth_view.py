@@ -1,6 +1,5 @@
 import streamlit as st
 import requests
-import time
 
 from components.auth_cookie import write_auth_cookie
 from components.api_config import get_backend_api_url

@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import time
 
 from components.auth_cookie import write_auth_cookie
 from components.api_config import get_backend_api_url
@@ -44,6 +45,7 @@ def render_auth_tab(backend_url=None, cookie_controller=None):
                                     pass
 
                                 if cookie_controller is not None:
+                                    print("Writing auth cookie...")
                                     write_auth_cookie(
                                         cookie_controller,
                                         data["access_token"],
@@ -51,6 +53,7 @@ def render_auth_tab(backend_url=None, cookie_controller=None):
                                     )
 
                                 st.success("Authentication Successful!")
+                                time.sleep(1)
                                 st.rerun()
                             else:
                                 st.error("Invalid credentials or access denied.")

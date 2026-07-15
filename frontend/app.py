@@ -3,7 +3,7 @@ import requests
 import streamlit as st
 from dotenv import load_dotenv
 from streamlit_cookies_controller import CookieController
-
+import time
 # Import our custom isolated modular views
 from components.auth_cookie import clear_auth_cookie, read_auth_cookie
 from components.auth_view import render_auth_tab
@@ -12,7 +12,7 @@ from components.kg_view import render_kg_tab
 from components.blueprint_view import render_blueprint_tab
 from components.other_information_view import render_other_information_tab
 from components.api_config import get_backend_api_url
-
+import time
 
 load_dotenv()
 BACKEND_API_URL = get_backend_api_url()
@@ -76,6 +76,7 @@ with st.sidebar:
             clear_auth_cookie(cookie_controller)
             st.session_state["access_token"] = None
             st.session_state["user_info"] = None
+            time.sleep(1)
             st.rerun()
     else:
         st.warning("Authentication Required")
@@ -92,9 +93,11 @@ tab_auth, tab_dashboard, tab_kg, tab_blueprint, tab_other_information = st.tabs(
 ])
 
 with tab_auth:
+    
     render_auth_tab(BACKEND_API_URL, cookie_controller)
 
 with tab_dashboard:
+
     render_dashboard_tab()
 
 with tab_kg:

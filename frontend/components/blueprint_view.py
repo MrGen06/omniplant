@@ -1,5 +1,6 @@
 import os
 import json
+import ssl
 import base64
 from datetime import datetime
 
@@ -32,6 +33,29 @@ def get_image_base64(image_path):
             return base64.b64encode(img_file.read()).decode()
     except FileNotFoundError:
         return None
+
+
+def create_neo4j_driver(uri, username, password):
+    if uri.lower().startswith("neo4j+s://"):
+        return GraphDatabase.driver(uri, auth=(username, password))
+
+    if uri.lower().startswith("neo4j://") and "databases.neo4j.io" in uri.lower():
+        secure_uri = uri.replace("neo4j://", "neo4j+ssc://", 1)
+        return GraphDatabase.driver(secure_uri, auth=(username, password))
+
+    if uri.lower().startswith("bolt+s://"):
+        return GraphDatabase.driver(uri, auth=(username, password))
+
+    if uri.lower().startswith("bolt://") and "databases.neo4j.io" in uri.lower():
+        secure_uri = uri.replace("bolt://", "bolt+ssc://", 1)
+        return GraphDatabase.driver(secure_uri, auth=(username, password))
+
+    # Local / self-signed fallback for non-routing URIs
+    return GraphDatabase.driver(
+        uri,
+        auth=(username, password),
+        trusted_certificates=TrustAll(),
+    )
 
 
 def load_equipment_nodes(base_dir, frontend_dir):
@@ -245,7 +269,7 @@ def render_blueprint_tab():
 
     driver = None
     try:
-        driver = GraphDatabase.driver(uri, auth=(username, password))
+        driver = create_neo4j_driver(uri, username, password)
         if "show_workorder_form" not in st.session_state:
             st.session_state.show_workorder_form = False
 

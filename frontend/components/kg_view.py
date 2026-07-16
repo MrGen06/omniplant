@@ -18,43 +18,56 @@ def render_kg_tab():
     if "uploaded_pdfs" not in st.session_state:
         st.session_state["uploaded_pdfs"] = []
     
+    user_info = st.session_state.get("user_info") or {}
+    role_tier = user_info.get("role_tier")
+    try:
+        role_tier = int(role_tier) if role_tier is not None else 0
+    except (TypeError, ValueError):
+        role_tier = 0
+
+    can_ingest = role_tier >= 2
+
     # Adjusted column width slightly to give the chat interface more breathing room
     col_ingest, col_query = st.columns([1, 1.5]) 
     
     with col_ingest:
         st.write("### Asset Document Ingestion")
         st.caption("Upload raw engineering manuals or PDFs to parse them into the Graph.")
-        
-        uploaded_file = st.file_uploader("Choose a PDF file", type=["pdf"])
-        if st.button("Process & Parse Document", use_container_width=True):
-            if uploaded_file is not None:
-                with st.spinner("Extracting schemas with LlamaParse & injecting to Neo4j..."):
-                    try:
-                        # Send the PDF to the backend for processing
-                        files = {
-                                "file": (
-                                    uploaded_file.name,
-                                    uploaded_file.getvalue(),
-                                    "application/pdf",
-                                )
-                            }
-                        headers = {"Authorization": f"Bearer {st.session_state['access_token']}"}
-                        response = requests.post(f"{BACKEND_API_URL}/api/ingest/pdf", files=files, headers=headers)
-                        
-                        if response.status_code == 200:
-                            st.success("Document processed and ingested successfully!")
-                            st.session_state["uploaded_pdfs"].append(
-                                {
-                                    "filename": uploaded_file.name,
-                                    "uploaded_at": datetime.now().isoformat(timespec="seconds"),
+
+        if not can_ingest:
+            st.warning("PDF ingestion is restricted to Tier 2 and Tier 3 employees.")
+            st.info("Your current access level does not include PDF ingestion.")
+        else:
+            uploaded_file = st.file_uploader("Choose a PDF file", type=["pdf"])
+            if st.button("Process & Parse Document", use_container_width=True):
+                if uploaded_file is not None:
+                    with st.spinner("Extracting schemas with LlamaParse & injecting to Neo4j..."):
+                        try:
+                            # Send the PDF to the backend for processing
+                            files = {
+                                    "file": (
+                                        uploaded_file.name,
+                                        uploaded_file.getvalue(),
+                                        "application/pdf",
+                                    )
                                 }
-                            )
-                        else:
-                            st.error(f"Backend Error {response.status_code}: {response.text}")
-                    except Exception as e:
-                        st.error(f"Connection failed. Is the backend running? Error: {e}")
-            else:
-                st.error("Please select a valid PDF file first.")
+                            headers = {"Authorization": f"Bearer {st.session_state['access_token']}"}
+                            response = requests.post(f"{BACKEND_API_URL}/api/ingest/pdf", files=files, headers=headers)
+                            
+                            if response.status_code == 200:
+                                st.success("Document processed and ingested successfully!")
+                                st.session_state["uploaded_pdfs"].append(
+                                    {
+                                        "filename": uploaded_file.name,
+                                        "uploaded_at": datetime.now().isoformat(timespec="seconds"),
+                                    }
+                                )
+                            else:
+                                st.error(f"Backend Error {response.status_code}: {response.text}")
+                        except Exception as e:
+                            st.error(f"Connection failed. Is the backend running? Error: {e}")
+                else:
+                    st.error("Please select a valid PDF file first.")
 
     with col_query:
         st.write("### OmniPlant AI Assistant")

@@ -11,6 +11,7 @@ from components.dashboard_view import render_dashboard_tab
 from components.kg_view import render_kg_tab
 from components.blueprint_view import render_blueprint_tab
 from components.other_information_view import render_other_information_tab
+from components.manage_employees_view import render_manage_employees_tab
 from components.api_config import get_backend_api_url
 import time
 
@@ -83,28 +84,36 @@ with st.sidebar:
 
 st.title("Industrial Knowledge & Control Center")
 
-# MODIFIED: Added "Interactive Blueprint" as a 4th option in the list
-tab_auth, tab_dashboard, tab_kg, tab_blueprint, tab_other_information = st.tabs([
+available_tabs = [
     "Authentication",
     "Tier Dashboard",
     "Knowledge Graph & AI",
-    "Interactive P&ID Blueprint", # ADDED THIS TAB
-    "Other Information"
-])
+    "Interactive P&ID Blueprint",
+    "Other Information",
+]
 
-with tab_auth:
-    
-    render_auth_tab(BACKEND_API_URL, cookie_controller)
+user_tier = 0
+if st.session_state.get("user_info") is not None:
+    try:
+        user_tier = int(st.session_state["user_info"].get("role_tier", 0))
+    except (TypeError, ValueError):
+        user_tier = 0
 
-with tab_dashboard:
+if user_tier >= 3:
+    available_tabs.append("Manage Employees")
 
-    render_dashboard_tab()
+tabs = st.tabs(available_tabs)
 
-with tab_kg:
-    render_kg_tab()
+# Map tab label to its associated render function
+tab_mapping = {
+    "Authentication": lambda: render_auth_tab(BACKEND_API_URL, cookie_controller),
+    "Tier Dashboard": render_dashboard_tab,
+    "Knowledge Graph & AI": render_kg_tab,
+    "Interactive P&ID Blueprint": render_blueprint_tab,
+    "Other Information": render_other_information_tab,
+    "Manage Employees": lambda: render_manage_employees_tab(BACKEND_API_URL),
+}
 
-with tab_blueprint:
-    render_blueprint_tab() # ADDED THIS CALL TO RENDER THE BLUEPRINT VIEW
-
-with tab_other_information:
-    render_other_information_tab()
+for idx, tab_label in enumerate(available_tabs):
+    with tabs[idx]:
+        tab_mapping[tab_label]()

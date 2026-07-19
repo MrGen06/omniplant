@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Body, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
-import traceback  # <--- Added to reveal hidden errors!
+import traceback
+
+from requests import request  # <--- Added to reveal hidden errors!
 
 from services.ingest_synthetic_pdfs import ingest_uploaded_pdf
 from services.query_pipeline import pipeline
 from services.imagekit_client import upload_file_bytes
+from services.ingest_tips import process_tip
 
 router = APIRouter()
 
@@ -92,4 +95,48 @@ async def query_pdf_from_frontend(request: QueryRequest = Body(...)):
         raise HTTPException(
             status_code=500,
             detail=f"An error occurred while processing the query: {str(e)}"
+        )
+        
+        
+
+from fastapi import APIRouter, Body, HTTPException, status
+import traceback
+
+@router.post("/add_tip")
+async def add_tips_to_neo4j(request: dict = Body(...)):
+
+    employee = request.get("employee")
+    tip = request.get("tip")
+
+    if not employee:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Employee information is required."
+        )
+
+    if not tip:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tip is required."
+        )
+
+    try:
+        result = process_tip(
+            employee=employee,
+            raw_tip=tip
+        )
+
+        return {
+            "employee": employee.get("name"),
+            "tip": tip,
+            **result
+        }
+
+    except Exception as e:
+        traceback.print_exc()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_=False,
+            detail=f"Failed to process tip: {str(e)}"
         )

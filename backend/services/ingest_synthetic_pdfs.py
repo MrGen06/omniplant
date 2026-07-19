@@ -6,6 +6,7 @@ import tempfile
 import dotenv
 import requests
 import re
+import asyncio
 from connection.llama_parse import parser
 import  connection.neo_4j as neo4j
 from huggingface_hub import InferenceClient
@@ -155,14 +156,25 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
 
 
 def parse_pdf(file_path: str):
-    """Parse a PDF using the shared LlamaParse client."""
-    if not parser:
+    """Parse a PDF using a locally instantiated LlamaParse client to prevent stale event loop bindings."""
+    try:
+        from llama_parse import LlamaParse
+    except ImportError:
+        LlamaParse = None
+    
+    from connection.llama_parse import LLAMA_CLOUD_API_KEY
+        
+    if not LLAMA_CLOUD_API_KEY or not LlamaParse:
         print("LLAMA_CLOUD_API_KEY missing.")
         return []
 
     try:
         print(f"Parsing {file_path}...")
-        documents = parser.load_data(file_path)
+        local_parser = LlamaParse(
+            api_key=LLAMA_CLOUD_API_KEY,
+            result_type="markdown"
+        )
+        documents = local_parser.load_data(file_path)
 
         if not documents:
             print("No documents returned.")
@@ -195,13 +207,15 @@ def embed_in_batches(chunk_texts: list[str]) -> list[list[float]]:
     return all_vectors
 
 
-def create_document_node(session, filename: str) -> None:
-    """Create or reuse the main document node."""
+def create_document_node(session, filename: str, url: str = None) -> None:
+    """Create or reuse the main document node safely across case variations."""
     session.run(
         """
         MERGE (d:Document {name: toLower($filename)})
+        SET d.url = CASE WHEN $url IS NOT NULL AND $url <> '' THEN $url ELSE d.url END
         """,
         filename=filename,
+        url=url,
     )
 
 
@@ -254,9 +268,9 @@ def create_entity_links(session, filename: str, chunk_index: int, graph: dict) -
         record = result.single()
 
         if record is None:
-            print(f"❌ Chunk not found: {chunk_id}")
+            print(f"[ERROR] Chunk not found: {chunk_id}")
         else:
-            print(f"✅ Linked {record['entity']} to {record['chunk']}")
+            print(f"[SUCCESS] Linked {record['entity']} to {record['chunk']}")
 
 
 def create_relationship_links(session, graph: dict) -> None:
@@ -267,7 +281,7 @@ def create_relationship_links(session, graph: dict) -> None:
         rel_type = rel["type"]
 
         if rel_type not in ALLOWED_RELATIONS:
-            print(f"⚠️ Skipping unsupported relation: {rel_type}")
+            print(f"[WARN] Skipping unsupported relation: {rel_type}")
             continue
 
         source = rel["source"].strip()
@@ -291,18 +305,18 @@ def create_relationship_links(session, graph: dict) -> None:
         record = result.single()
 
         if record is None:
-            print(f"❌ Could not create: {source} -[{rel_type}]-> {target}")
+            print(f"[ERROR] Could not create: {source} -[{rel_type}]-> {target}")
         else:
             print(
-                f"✅ {record['source']} -[{record['relation']}]-> {record['target']}"
+                f"[SUCCESS] {record['source']} -[{record['relation']}]-> {record['target']}"
             )
 
 
-def store_in_neo4j(filename: str, documents, all_vectors: list[list[float]]) -> None:
+def store_in_neo4j(filename: str, documents, all_vectors: list[list[float]], url: str = None) -> None:
     """Write the parsed chunks, embeddings, and graph data into Neo4j."""
     try:
         with driver.session() as session:
-            create_document_node(session, filename)
+            create_document_node(session, filename, url)
 
             for index, (doc, embedding) in enumerate(zip(documents, all_vectors)):
             
@@ -330,9 +344,16 @@ def create_vector_index(session):
 
 global driver
 
-def all_flow(file_path: str, filename: str):
+def all_flow(file_path: str, filename: str, url: str = None):
     """Run the full ingest flow in a simple, readable sequence."""
    
+    # Store the document node first so it is immediately visible in the UI
+    try:
+        with driver.session() as session:
+            create_document_node(session, filename, url)
+    except Exception as exc:
+        print(f"Error creating Document node initially: {exc}")
+
     documents = parse_pdf(file_path)
     if not documents:
         return [], []
@@ -346,17 +367,17 @@ def all_flow(file_path: str, filename: str):
     
     print(f"Generated {len(all_vectors)} embeddings.")
 
-    store_in_neo4j(filename, documents, all_vectors)
+    store_in_neo4j(filename, documents, all_vectors, url)
     create_vector_index(driver.session())
     return documents, all_vectors
     
     
 
 
-async def ingest_uploaded_pdf(file_bytes: bytes, filename: str):
+async def ingest_uploaded_pdf(file_bytes: bytes, filename: str, url: str = None):
     global driver
-    driver = neo4j.driver
-    print("driver",driver)
+    driver = neo4j.connect_to_neo4j()
+    print("driver", driver)
     """Save an uploaded PDF temporarily, process it, and remove the temp file."""
     temp_path = None
 
@@ -366,7 +387,8 @@ async def ingest_uploaded_pdf(file_bytes: bytes, filename: str):
             temp_path = temp_file.name
 
         print(f"Temporary file created: {temp_path}")
-        documents, embeddings = all_flow(temp_path, filename)
+        # Run the heavy synchronous flow in a separate thread to prevent blocking the main event loop
+        documents, embeddings = await asyncio.to_thread(all_flow, temp_path, filename, url)
 
         return {
             "documents": documents,
@@ -375,11 +397,9 @@ async def ingest_uploaded_pdf(file_bytes: bytes, filename: str):
         }
     except Exception as exc:
         print(f"Processing Error: {exc}")
-        return {
-            "documents": [],
-            "embeddings": [],
-            "count": 0,
-        }
+        import traceback
+        traceback.print_exc()
+        raise exc
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)

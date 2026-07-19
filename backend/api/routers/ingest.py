@@ -4,12 +4,14 @@ import traceback  # <--- Added to reveal hidden errors!
 
 from services.ingest_synthetic_pdfs import ingest_uploaded_pdf
 from services.query_pipeline import pipeline
+from services.imagekit_client import upload_file_bytes
 
 router = APIRouter()
 
 class IngestResponse(BaseModel):
     filename: str
     chunks_ingested: int
+    url: str | None = None
 
 class QueryRequest(BaseModel):
     query: str
@@ -31,11 +33,27 @@ async def ingest_pdf_from_frontend(file: UploadFile = File(...)):
             detail="Uploaded file is empty",
         )
 
-    ingest_result = await ingest_uploaded_pdf(file_bytes, file.filename or "upload.pdf")
+    # 1. Upload file to ImageKit
+    try:
+        print(f"Uploading {file.filename} to ImageKit...")
+        ik_res = upload_file_bytes(file_bytes, file.filename or "upload.pdf")
+        ik_url = ik_res.url
+        print(f"Successfully uploaded to ImageKit. URL: {ik_url}")
+    except Exception as e:
+        print(f"Error uploading to ImageKit: {e}")
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload PDF to ImageKit: {str(e)}"
+        )
+
+    # 2. Parse using LlamaParse and ingest into Neo4j
+    ingest_result = await ingest_uploaded_pdf(file_bytes, file.filename or "upload.pdf", url=ik_url)
 
     return {
         "filename": file.filename or "upload.pdf",
         "chunks_ingested": ingest_result.get("count", 0),
+        "url": ik_url,
     }
     
 # FIX: Re-add async to the alias endpoint

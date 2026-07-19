@@ -2,7 +2,7 @@ import os
 import ssl
 
 import streamlit as st
-from neo4j import GraphDatabase
+from neo4j import GraphDatabase, TrustAll
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -52,7 +52,8 @@ def fetch_documents(session):
     MATCH (d:Document)
 
     RETURN
-        d.name AS filename
+        d.name AS filename,
+        d.url AS url
         
     ORDER BY d.name
     """
@@ -91,6 +92,11 @@ def render_other_information_tab():
             with st.expander(f"{idx}. {doc['filename']}"):
 
                 st.write(f"**Document Name:** {doc['filename']}")
+                if doc.get("url"):
+                    st.markdown(f"[🔗 Open/Download PDF]({doc['url']})")
+                    st.components.v1.iframe(doc["url"], height=600)
+                else:
+                    st.warning("No PDF URL found for this document.")
 
                
     except Exception as e:

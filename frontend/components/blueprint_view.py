@@ -5,7 +5,7 @@ import base64
 from datetime import datetime
 
 import streamlit as st
-from neo4j import GraphDatabase
+from neo4j import GraphDatabase, TrustAll
 from dotenv import load_dotenv
 from st_click_detector import click_detector
 

@@ -25,9 +25,18 @@ driver = None
 def connect_to_neo4j():
     global driver
     
-    # If driver is already initialized, don't recreate it
+    # If driver is already initialized, don't recreate it without checking
     if driver is not None:
-        return driver
+        try:
+            driver.verify_connectivity()
+            return driver
+        except Exception as e:
+            print(f"Existing Neo4j connection stale or defunct. Reconnecting... Error: {e}")
+            try:
+                driver.close()
+            except Exception:
+                pass
+            driver = None
         
     print(f"Initializing Neo4j Connection to: {NEO4J_URI}")
     

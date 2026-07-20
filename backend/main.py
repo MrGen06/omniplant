@@ -12,7 +12,7 @@ from api.routers import auth, ingest, users
 from core.database import engine, Base, SessionLocal
 from core.auth_middleware import CredentialMiddleware
 from models.user import UserModel
-
+from models.pending_tip import PendingTip
 # Import Connection Components
 from connection.neo_4j import connect_to_neo4j
 from connection.llama_parse import parse_pdf

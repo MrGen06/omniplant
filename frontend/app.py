@@ -4,6 +4,7 @@ import streamlit as st
 from dotenv import load_dotenv
 from streamlit_cookies_controller import CookieController
 import time
+
 # Import our custom isolated modular views
 from components.auth_cookie import clear_auth_cookie, read_auth_cookie
 from components.auth_view import render_auth_tab
@@ -12,8 +13,8 @@ from components.kg_view import render_kg_tab
 from components.blueprint_view import render_blueprint_tab
 from components.other_information_view import render_other_information_tab
 from components.manage_employees_view import render_manage_employees_tab
+from components.employee_time_view import render_employee_time_tab
 from components.api_config import get_backend_api_url
-import time
 
 load_dotenv()
 BACKEND_API_URL = get_backend_api_url()
@@ -79,6 +80,44 @@ with st.sidebar:
             st.session_state["user_info"] = None
             time.sleep(1)
             st.rerun()
+
+        # Notification Sidebar for Tier 2 and above
+        try:
+            tier = int(user.get('role_tier', 0))
+            if tier >= 2:
+                st.markdown("---")
+                st.subheader("🔔 Pending Approvals")
+                try:
+                    res = requests.get(f"{BACKEND_API_URL}/api/ingest/pending_tips", timeout=5)
+                    if res.status_code == 200:
+                        pending = res.json()
+                        if pending:
+                            for p in pending:
+                                with st.expander(f"Tip from {p['employee_name']} ({p['employee_id']})"):
+                                    st.write(p['tip_text'])
+                                    st.caption(f"Approvals: {p['approvals_count']}/2")
+                                    
+                                    approved_list = [x for x in p.get('approved_by', '').split(',') if x]
+                                    current_emp_id = str(user.get('employee_id'))
+                                    
+                                    if current_emp_id in approved_list:
+                                        st.success("✓ Approved by you")
+                                    else:
+                                        if st.button("Approve", key=f"approve_{p['id']}", type="primary"):
+                                            payload = {"tip_id": p['id'], "approver_id": current_emp_id}
+                                            app_res = requests.post(f"{BACKEND_API_URL}/api/ingest/approve_tip", json=payload)
+                                            if app_res.status_code == 200:
+                                                st.success(app_res.json().get('message', 'Approved!'))
+                                                time.sleep(1)
+                                                st.rerun()
+                                            else:
+                                                st.error(app_res.text)
+                        else:
+                            st.info("No pending tips.")
+                except Exception as e:
+                    st.error("Failed to load notifications.")
+        except ValueError:
+            pass
     else:
         st.warning("Authentication Required")
 
@@ -90,6 +129,7 @@ available_tabs = [
     "Knowledge Graph & AI",
     "Interactive P&ID Blueprint",
     "Other Information",
+    "Employee Time",
 ]
 
 user_tier = 0
@@ -111,6 +151,7 @@ tab_mapping = {
     "Knowledge Graph & AI": render_kg_tab,
     "Interactive P&ID Blueprint": render_blueprint_tab,
     "Other Information": render_other_information_tab,
+    "Employee Time": lambda: render_employee_time_tab(BACKEND_API_URL),
     "Manage Employees": lambda: render_manage_employees_tab(BACKEND_API_URL),
 }
 

@@ -20,7 +20,6 @@ BACKEND_API_URL = get_backend_api_url()
 
 st.set_page_config(
     page_title="OmniPlant.AI Portal",
-    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -64,8 +63,7 @@ restore_login_from_cookie()
 
 # Sidebar controller layout
 with st.sidebar:
-    st.title("⚡ OmniPlant.AI")
-    st.caption("Decoupled Modular Architecture")
+    st.title("OmniPlant.AI")
     st.markdown("---")
 
     if st.session_state["access_token"]:
@@ -155,7 +153,7 @@ available_tabs = [
     "Knowledge Graph & AI",
     "Interactive P&ID Blueprint",
     "Other Information",
-    "Employee Time",
+    "Employee Tips",
 ]
 
 user_tier = 0
@@ -176,7 +174,7 @@ tab_mapping = {
     "Knowledge Graph & AI": render_kg_tab,
     "Interactive P&ID Blueprint": render_blueprint_tab,
     "Other Information": render_other_information_tab,
-    "Employee Time": lambda: render_employee_time_tab(BACKEND_API_URL),
+    "Employee Tips": lambda: render_employee_time_tab(BACKEND_API_URL),
     "Manage Employees": lambda: render_manage_employees_tab(BACKEND_API_URL),
 }
 

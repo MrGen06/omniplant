@@ -6,7 +6,7 @@ def render_employee_time_tab(api_url):
         st.info("🔒 Authentication required. Please log in via the Authentication tab to submit maintenance tips.")
         return
 
-    st.header("Employee Time - Share Your Knowledge")
+    st.header("Employee Tips - Share Your Knowledge")
     
     st.write("Enter maintenance tips, observations, or general knowledge below. You can use English, Hindi, Hinglish, short forms, or mix languages.")
     

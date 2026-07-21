@@ -150,13 +150,20 @@ def build_context(chunk_id, session):
     query = """
     MATCH (c:Chunk)
     WHERE c.chunk_id IN $chunk_ids
-    RETURN c.chunk_id AS chunk_id, c.text AS text
+    OPTIONAL MATCH (d:Document)-[:HAS_CHUNK]->(c)
+    RETURN c.chunk_id AS chunk_id, c.text AS text, d.name AS document_name
     """
 
     result = session.run(query, chunk_ids=chunk_id)
 
-    context = "\n".join([record["text"] for record in result])
-    return context
+    context_str = ""
+    for record in result:
+        doc_name = record.get("document_name") or "Unknown Document"
+        chunk = record.get("chunk_id", "")
+        text = record.get("text", "")
+        context_str += f"--- Document: {doc_name} (Chunk/Section: {chunk}) ---\n{text}\n\n"
+        
+    return context_str
 
 
 ROLE_PROMPTS = {
@@ -275,6 +282,93 @@ def build_workorder_context(session, equipment: str | None, query: str):
     return "\n\n".join(formatted_lines)
 
 
+def build_tip_context(session, equipment: str | None, query: str):
+    """Fetch employee tips context."""
+    if equipment:
+        result = session.run(
+            """
+            MATCH (e)
+            WHERE (e:Equipment OR e:Component) AND toLower(coalesce(e.id, e.name)) = toLower($equipment)
+            
+            OPTIONAL MATCH (t:Tip)-[:ABOUT]->(e)
+            OPTIONAL MATCH (emp:Employee)-[:SUBMITTED]->(t)
+            
+            RETURN collect(DISTINCT {
+                id: t.id,
+                date: toString(t.created_at),
+                raw_text: t.raw_text,
+                employee: emp.name
+            }) AS tips
+            """,
+            equipment=equipment,
+        )
+    else:
+        # Fallback text search if equipment is not explicitly parsed
+        result = session.run(
+            """
+            MATCH (t:Tip)
+            WHERE toLower(t.raw_text) CONTAINS toLower($query)
+            OPTIONAL MATCH (emp:Employee)-[:SUBMITTED]->(t)
+            OPTIONAL MATCH (t)-[:ABOUT]->(e)
+            
+            RETURN collect(DISTINCT {
+                equipment: coalesce(e.id, e.name),
+                id: t.id,
+                date: toString(t.created_at),
+                raw_text: t.raw_text,
+                employee: emp.name
+            }) AS tips
+            """,
+            query=query,
+        )
+
+        record = result.single()
+        if not record or not record["tips"]:
+            # Generic fetch recent tips
+            result = session.run(
+                """
+                MATCH (t:Tip)
+                OPTIONAL MATCH (emp:Employee)-[:SUBMITTED]->(t)
+                OPTIONAL MATCH (t)-[:ABOUT]->(e)
+                RETURN collect(DISTINCT {
+                    equipment: coalesce(e.id, e.name),
+                    id: t.id,
+                    date: toString(t.created_at),
+                    raw_text: t.raw_text,
+                    employee: emp.name
+                })[0..5] AS tips
+                """
+            )
+
+    record = result.single()
+    if not record:
+        return ""
+
+    tips = record["tips"] or []
+    if not tips:
+        return ""
+
+    formatted_lines = []
+    for tip in tips:
+        if not tip or not tip.get("id"):
+            continue
+
+        equipment_name = tip.get("equipment")
+        header = [f"Tip ID: {tip.get('id', '')}"]
+        if equipment_name:
+            header.append(f"Equipment/Component: {equipment_name}")
+        if tip.get("date"):
+            header.append(f"Date: {tip.get('date', '')}")
+        if tip.get("employee"):
+            header.append(f"Submitted By: {tip.get('employee', '')}")
+
+        formatted_lines.append(
+            "\n".join(header + [f"Tip: {tip.get('raw_text', '')}"])
+        )
+
+    return "\n\n".join(formatted_lines)
+
+
 def answer_query(query, role, context):
     prompt = f"""
     {ROLE_PROMPTS[role]}
@@ -285,7 +379,8 @@ def answer_query(query, role, context):
     User Question:
     {query}
 
-    Use any relevant manual or work-order history information that appears in the context.
+    Use any relevant manual, work-order history, or employee tip information that appears in the context.
+    When answering using manual information, please cite the Document Name and Section/Chunk ID explicitly.
     Provide only the information that is available. Do not invent any information. If information is missing, explicitly say so.
 
     Provide:
@@ -293,8 +388,9 @@ def answer_query(query, role, context):
     2. Possible Cause
     3. Relevant Manual Information
     4. Relevant Work Order History
-    5. Recommended Steps
-    6. Safety Precautions
+    5. Relevant Employee Tips
+    6. Recommended Steps
+    7. Safety Precautions
 
     INSTRUCTIONS
     dont greet the user, dont apologize, dont ask for more information, dont ask for confirmation, dont ask for feedback, dont ask for follow-up questions, dont ask for clarification, dont ask for additional details, dont ask for more context, dont ask for more specifics, dont ask for more information about the equipment, dont ask for more information about the issue, dont ask for more information about the symptoms, dont ask for more information about the environment, dont ask for more information about the conditions, dont ask for more information about the operating parameters, dont ask for more information about the maintenance history, dont ask for more information about the previous repairs, dont ask for more information about the previous inspections, dont ask for more information about the previous failures, dont ask for more information about the previous issues, dont ask for more information about the previous problems.
@@ -371,18 +467,21 @@ def pipeline(query, role="Field Technician"):
 
             manual_context = build_context(chunk_id, session)
             workorder_context = build_workorder_context(session, equipment, query)
+            tip_context = build_tip_context(session, equipment, query)
 
             combined_context_parts = []
             if manual_context:
                 combined_context_parts.append("Manual Context:\n" + manual_context)
             if workorder_context:
                 combined_context_parts.append("Work Order History:\n" + workorder_context)
+            if tip_context:
+                combined_context_parts.append("Employee Tips:\n" + tip_context)
 
             context = "\n\n".join(combined_context_parts)
             if not context:
-                print("No manual or work-order context found for the supplied query.")
+                print("No manual, work-order, or tip context found for the supplied query.")
                 return (
-                    "No manual or work-order history was found in Neo4j for this query. "
+                    "No manual, work-order history, or employee tips were found in Neo4j for this query. "
                     "Try including an equipment tag, work order ID, or a more specific maintenance term."
                 )
 

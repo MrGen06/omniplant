@@ -8,7 +8,6 @@ import time
 # Import our custom isolated modular views
 from components.auth_cookie import clear_auth_cookie, read_auth_cookie
 from components.auth_view import render_auth_tab
-from components.dashboard_view import render_dashboard_tab
 from components.kg_view import render_kg_tab
 from components.blueprint_view import render_blueprint_tab
 from components.other_information_view import render_other_information_tab
@@ -153,7 +152,6 @@ st.title("Industrial Knowledge & Control Center")
 
 available_tabs = [
     "Authentication",
-    "Tier Dashboard",
     "Knowledge Graph & AI",
     "Interactive P&ID Blueprint",
     "Other Information",
@@ -175,7 +173,6 @@ tabs = st.tabs(available_tabs)
 # Map tab label to its associated render function
 tab_mapping = {
     "Authentication": lambda: render_auth_tab(BACKEND_API_URL, cookie_controller),
-    "Tier Dashboard": render_dashboard_tab,
     "Knowledge Graph & AI": render_kg_tab,
     "Interactive P&ID Blueprint": render_blueprint_tab,
     "Other Information": render_other_information_tab,

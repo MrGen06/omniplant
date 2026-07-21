@@ -86,34 +86,62 @@ with st.sidebar:
             tier = int(user.get('role_tier', 0))
             if tier >= 2:
                 st.markdown("---")
-                st.subheader("🔔 Pending Approvals")
+                st.subheader("🔔 Tip Approvals")
                 try:
-                    res = requests.get(f"{BACKEND_API_URL}/api/ingest/pending_tips", timeout=5)
+                    res = requests.get(f"{BACKEND_API_URL}/api/ingest/all_tips", timeout=5)
                     if res.status_code == 200:
-                        pending = res.json()
-                        if pending:
-                            for p in pending:
-                                with st.expander(f"Tip from {p['employee_name']} ({p['employee_id']})"):
-                                    st.write(p['tip_text'])
-                                    st.caption(f"Approvals: {p['approvals_count']}/2")
-                                    
-                                    approved_list = [x for x in p.get('approved_by', '').split(',') if x]
-                                    current_emp_id = str(user.get('employee_id'))
-                                    
+                        all_tips = res.json()
+                        if all_tips:
+                            action_required = []
+                            waiting_on_others = []
+                            fully_approved = []
+                            
+                            current_emp_id = str(user.get('employee_id'))
+                            for p in all_tips:
+                                approved_list = [x for x in p.get('approved_by', '').split(',') if x]
+                                if p.get('status') == 'Approved':
+                                    fully_approved.append(p)
+                                elif p.get('status') == 'Pending':
                                     if current_emp_id in approved_list:
-                                        st.success("✓ Approved by you")
+                                        waiting_on_others.append(p)
                                     else:
+                                        action_required.append(p)
+                                        
+                            if action_required:
+                                st.markdown("**Action Required**")
+                                for p in action_required:
+                                    emp_id_str = f" ({p['employee_id']})" if p.get('employee_id') else ""
+                                    with st.expander(f"Tip from {p['employee_name']}{emp_id_str}"):
+                                        st.write(p['tip_text'])
+                                        st.caption(f"Approvals: {p['approvals_count']}/2")
                                         if st.button("Approve", key=f"approve_{p['id']}", type="primary"):
                                             payload = {"tip_id": p['id'], "approver_id": current_emp_id}
                                             app_res = requests.post(f"{BACKEND_API_URL}/api/ingest/approve_tip", json=payload)
                                             if app_res.status_code == 200:
-                                                st.success(app_res.json().get('message', 'Approved!'))
+                                                st.success("Approved!")
                                                 time.sleep(1)
                                                 st.rerun()
                                             else:
                                                 st.error(app_res.text)
+                            
+                            if waiting_on_others:
+                                st.markdown("**Waiting on Others**")
+                                for p in waiting_on_others:
+                                    emp_id_str = f" ({p['employee_id']})" if p.get('employee_id') else ""
+                                    with st.expander(f"Tip from {p['employee_name']}{emp_id_str}"):
+                                        st.write(p['tip_text'])
+                                        st.caption(f"Approvals: {p['approvals_count']}/2")
+                                        st.info("✓ Approved by you")
+                                        
+                            if fully_approved:
+                                st.markdown("**Fully Approved & Ingested**")
+                                for p in fully_approved[:5]: # Show only last 5
+                                    emp_id_str = f" ({p['employee_id']})" if p.get('employee_id') else ""
+                                    with st.expander(f"Tip from {p['employee_name']}{emp_id_str}"):
+                                        st.write(p['tip_text'])
+                                        st.success("Ingested")
                         else:
-                            st.info("No pending tips.")
+                            st.info("No tips found.")
                 except Exception as e:
                     st.error("Failed to load notifications.")
         except ValueError:

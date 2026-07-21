@@ -1,28 +1,31 @@
 import os
+from pathlib import Path
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-# 1. FIND THE ABSOLUTE LOCATION OF THIS CONFIG FILE
-# This evaluates to: .../backend/core/
-current_dir = os.path.dirname(os.path.abspath(__file__))
+# Locate .env in the backend root directory (parent of core/)
+backend_root = Path(__file__).resolve().parent.parent
+env_path = backend_root / ".env"
+load_dotenv(dotenv_path=env_path)
 
-# 2. NAVIGATE UP ONE LEVEL TO THE BACKEND ROOT FOLDER
-# This evaluates to: .../backend/
-backend_root = os.path.dirname(current_dir)
+# Fetch POSTGRE_URL or fallback DATABASE_URL
+DATABASE_URL = os.getenv("POSTGRE_URL") or os.getenv("DATABASE_URL")
 
-# 3. LINK THE DATABASE FILE STRING ABSOLUTELY TO THE BACKEND DIRECTORY
-db_absolute_path = os.path.join(backend_root, "omniplant.db")
+if not DATABASE_URL:
+    raise ValueError(
+        "POSTGRE_URL (or DATABASE_URL) is missing from your backend/.env file!\n"
+        "Please paste your Supabase connection URI into backend/.env as:\n"
+        "POSTGRE_URL=postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres"
+    )
 
-# 4. ENFORCE PRODUCTION-GRADE SQLITE CONNECTION STRINGS
-# Generates: sqlite:///C:/Users/.../backend/omniplant.db
-DATABASE_URL = f"sqlite:///{db_absolute_path}"
+# Fix legacy postgres:// prefix if present
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# Initialize standard engine hooks
-engine = create_engine(
-    DATABASE_URL, 
-    connect_args={"check_same_thread": False}  # Crucial fallback setting for SQLite async handlers
-)
+# Initialize standard engine hooks for PostgreSQL
+engine = create_engine(DATABASE_URL)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

@@ -146,9 +146,9 @@ async def add_tip_pending(request: dict = Body(...), db: Session = Depends(get_d
             detail=f"Failed to add tip: {str(e)}"
         )
 
-@router.get("/pending_tips")
-async def get_pending_tips(db: Session = Depends(get_db)):
-    tips = db.query(PendingTip).filter(PendingTip.status == "Pending").all()
+@router.get("/all_tips")
+async def get_all_tips(db: Session = Depends(get_db)):
+    tips = db.query(PendingTip).order_by(PendingTip.created_at.desc()).all()
     return [{
         "id": t.id,
         "employee_id": t.employee_id,
@@ -156,6 +156,21 @@ async def get_pending_tips(db: Session = Depends(get_db)):
         "tip_text": t.tip_text,
         "approvals_count": t.approvals_count,
         "approved_by": t.approved_by,
+        "status": t.status,
+        "created_at": t.created_at
+    } for t in tips]
+
+@router.get("/my_tips/{employee_id}")
+async def get_my_tips(employee_id: str, db: Session = Depends(get_db)):
+    tips = db.query(PendingTip).filter(PendingTip.employee_id == employee_id).order_by(PendingTip.created_at.desc()).all()
+    return [{
+        "id": t.id,
+        "employee_id": t.employee_id,
+        "employee_name": t.employee_name,
+        "tip_text": t.tip_text,
+        "approvals_count": t.approvals_count,
+        "approved_by": t.approved_by,
+        "status": t.status,
         "created_at": t.created_at
     } for t in tips]
 

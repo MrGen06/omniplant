@@ -3,6 +3,8 @@
 **OmniPlant.AI** is an enterprise-grade industrial intelligence platform that combines **Interactive P&ID (Piping & Instrumentation Diagram) Blueprints**, **Hybrid Graph-Vector Retrieval-Augmented Generation (RAG)**, **Peer-Approved Employee Maintenance Tips**, and **Role-Based Access Control (RBAC)** to streamline plant operations, maintenance troubleshooting, and equipment diagnostics.
 
 ---
+FRONTEND LIVE- https://omniplant.streamlit.app/
+SERVER LIVE- https://omniplant.onrender.com/
 
 ## 🌟 Key Features
 

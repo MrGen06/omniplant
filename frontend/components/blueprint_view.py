@@ -177,6 +177,10 @@ def update_work_order(
 
 
 def render_blueprint_tab():
+    if not st.session_state.get("access_token"):
+        st.info("🔒 Authentication required. Please log in via the Authentication tab to access the Interactive P&ID Blueprint.")
+        return
+
     st.subheader("Interactive P&ID Asset Explorer")
     st.write("Click directly on any highlighted equipment tag on the blueprint drawing to fetch and manage work orders.")
 

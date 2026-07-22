@@ -62,6 +62,9 @@ def fetch_documents(session):
 
 
 def render_other_information_tab():
+    if not st.session_state.get("access_token"):
+        st.info("🔒 Authentication required. Please log in via the Authentication tab to view uploaded documents.")
+        return
 
     st.subheader("📄 Uploaded PDF Documents")
     st.caption("View all PDF documents stored in the Knowledge Graph.")

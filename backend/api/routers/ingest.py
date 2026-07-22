@@ -1,5 +1,8 @@
-from fastapi import APIRouter, Body, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Body, File, HTTPException, UploadFile, status, Depends
+from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from core.database import get_db
+from models.pending_tip import PendingTip
 import traceback
 
 from requests import request  # <--- Added to reveal hidden errors!
@@ -103,15 +106,14 @@ from fastapi import APIRouter, Body, HTTPException, status
 import traceback
 
 @router.post("/add_tip")
-async def add_tips_to_neo4j(request: dict = Body(...)):
-
+async def add_tip_pending(request: dict = Body(...), db: Session = Depends(get_db)):
     employee = request.get("employee")
     tip = request.get("tip")
 
-    if not employee:
+    if not employee or not employee.get("id") or not employee.get("name"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Employee information is required."
+            detail="Valid employee information (id, name) is required."
         )
 
     if not tip:
@@ -121,22 +123,107 @@ async def add_tips_to_neo4j(request: dict = Body(...)):
         )
 
     try:
-        result = process_tip(
-            employee=employee,
-            raw_tip=tip
+        new_tip = PendingTip(
+            employee_id=employee["id"],
+            employee_name=employee["name"],
+            tip_text=tip,
+            status="Pending"
         )
+        db.add(new_tip)
+        db.commit()
+        db.refresh(new_tip)
 
         return {
-            "employee": employee.get("name"),
-            "tip": tip,
-            **result
+            "success": True,
+            "message": "Tip submitted for approval",
+            "tip_id": new_tip.id
         }
-
     except Exception as e:
+        db.rollback()
         traceback.print_exc()
-
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            status_=False,
-            detail=f"Failed to process tip: {str(e)}"
+            detail=f"Failed to add tip: {str(e)}"
         )
+
+@router.get("/all_tips")
+async def get_all_tips(db: Session = Depends(get_db)):
+    tips = db.query(PendingTip).order_by(PendingTip.created_at.desc()).all()
+    return [{
+        "id": t.id,
+        "employee_id": t.employee_id,
+        "employee_name": t.employee_name,
+        "tip_text": t.tip_text,
+        "approvals_count": t.approvals_count,
+        "approved_by": t.approved_by,
+        "status": t.status,
+        "created_at": t.created_at
+    } for t in tips]
+
+@router.get("/my_tips/{employee_id}")
+async def get_my_tips(employee_id: str, db: Session = Depends(get_db)):
+    tips = db.query(PendingTip).filter(PendingTip.employee_id == employee_id).order_by(PendingTip.created_at.desc()).all()
+    return [{
+        "id": t.id,
+        "employee_id": t.employee_id,
+        "employee_name": t.employee_name,
+        "tip_text": t.tip_text,
+        "approvals_count": t.approvals_count,
+        "approved_by": t.approved_by,
+        "status": t.status,
+        "created_at": t.created_at
+    } for t in tips]
+
+@router.post("/approve_tip")
+async def approve_tip(request: dict = Body(...), db: Session = Depends(get_db)):
+    tip_id = request.get("tip_id")
+    approver_id = request.get("approver_id")
+
+    if not tip_id or not approver_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="tip_id and approver_id are required."
+        )
+
+    tip = db.query(PendingTip).filter(PendingTip.id == tip_id).first()
+    if not tip:
+        raise HTTPException(status_code=404, detail="Tip not found.")
+
+    if tip.status != "Pending":
+        raise HTTPException(status_code=400, detail="Tip is not pending.")
+
+    approved_list = [x for x in tip.approved_by.split(",") if x]
+    if str(approver_id) in approved_list:
+        raise HTTPException(status_code=400, detail="You have already approved this tip.")
+
+    approved_list.append(str(approver_id))
+    tip.approved_by = ",".join(approved_list)
+    tip.approvals_count += 1
+    
+    response_msg = "Approval recorded."
+    processed_result = None
+
+    if tip.approvals_count >= 2:
+        tip.status = "Approved"
+        response_msg = "Tip fully approved and pushed to Neo4j."
+        # Push to Neo4j
+        try:
+            employee = {"id": tip.employee_id, "name": tip.employee_name}
+            processed_result = process_tip(employee, tip.tip_text)
+        except Exception as e:
+            db.rollback()
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to process tip into Neo4j: {str(e)}"
+            )
+
+    db.commit()
+
+    return {
+        "success": True,
+        "message": response_msg,
+        "tip_id": tip_id,
+        "approvals_count": tip.approvals_count,
+        "neo4j_result": processed_result
+    }

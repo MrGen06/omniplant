@@ -19,6 +19,7 @@ HEADERS = {
 
 HF_API_URL = "https://router.huggingface.co/hf-inference/models/BAAI/bge-small-en"
 
+model= os.getenv("MODEL")
 
 def create_embedding(query: str):
     print("query:", query)
@@ -75,7 +76,7 @@ def extract_equipment(query):
         """
   
     response = client.chat.completions.create(
-        model="Qwen/Qwen2.5-7B-Instruct",
+        model=model,
         messages=[
             {"role":"user","content":prompt}
         ],
@@ -403,7 +404,7 @@ def answer_query(query, role, context):
     """
     
     response = client.chat.completions.create(
-        model="Qwen/Qwen2.5-7B-Instruct",
+        model=model,
         messages=[
             {"role":"user","content":prompt}
         ],

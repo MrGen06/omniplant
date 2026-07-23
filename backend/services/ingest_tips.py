@@ -11,6 +11,7 @@ import connection.neo_4j as neo_4j
 
 client = InferenceClient( api_key=os.getenv("HUGGINGFACEHUB_ACCESS_TOKEN") )
 
+model= os.getenv("MODEL")
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ def extract_equipment(raw_text):
     try:
 
         response = client.chat.completions.create(
-            model="Qwen/Qwen2.5-7B-Instruct",
+            model=model,
             messages=[
                 {
                     "role": "user",
@@ -239,7 +240,7 @@ def process_tip(employee, raw_tip):
 
         except Exception as e:
             raise HTTPException(
-                status_=False,
+                
                 detail="Equipment extraction failed."
             )
             
@@ -262,7 +263,7 @@ def process_tip(employee, raw_tip):
 
     except Exception as e:
         raise HTTPException(
-            status=False,
+            
             detail=f"Failed to process tip: {str(e)}"
         )
        

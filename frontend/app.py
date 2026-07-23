@@ -73,6 +73,8 @@ with st.sidebar:
 
         if st.button("Logout", use_container_width=True):
             clear_auth_cookie(cookie_controller)
+            st.session_state.kg_messages=[]
+           
             st.session_state["access_token"] = None
             st.session_state["user_info"] = None
             time.sleep(1)

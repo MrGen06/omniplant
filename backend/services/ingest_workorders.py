@@ -12,6 +12,8 @@ NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 
+model= os.getenv("MODEL")
+
 def clean_data(file_path):
     """Stage 1: Read and sanitize the CSV using Pandas"""
     print(f"Reading data from {file_path}...")

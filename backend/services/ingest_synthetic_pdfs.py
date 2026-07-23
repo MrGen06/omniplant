@@ -14,6 +14,7 @@ from huggingface_hub import InferenceClient
 
 dotenv.load_dotenv()
 
+model=os.getenv("MODEL")
 
 HEADERS = {
     "Authorization": f"Bearer {os.getenv('HUGGINGFACEHUB_ACCESS_TOKEN')}",
@@ -96,7 +97,7 @@ def extract_graph(text: str) -> dict:
     try:
         # response = model.generate_content(build_extraction_prompt(text))
         response = client.chat.completions.create(
-        model="Qwen/Qwen2.5-7B-Instruct",
+        model=model,
         messages=[
             {
                 "role": "system",
@@ -342,7 +343,7 @@ def create_vector_index(session):
         }
         """)
 
-global driver
+driver=None
 
 def all_flow(file_path: str, filename: str, url: str = None):
     """Run the full ingest flow in a simple, readable sequence."""
